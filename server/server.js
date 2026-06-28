@@ -43,6 +43,9 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_records_user_id ON records(user_id);
   `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+  `);
 }
 
 const app = express();
