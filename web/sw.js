@@ -1,5 +1,5 @@
 const CACHE = "moneyfit-v1";
-const SHELL = ["/app/app.html", "/app/manifest.json", "/app/icons/icon.svg"];
+const SHELL = ["/app/app.html", "/app/manifest.json", "/app/icons/icon.svg", "/app/icons/icon-192.png", "/app/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
