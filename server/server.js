@@ -27,6 +27,15 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+const toPublicUser = (user) => ({
+  id: user.id,
+  email: user.email,
+  storeName: user.storeName,
+  businessNumber: user.businessNumber || "",
+  address: user.address || "",
+  phone: user.phone || "",
+});
+
 /* ── 인증 미들웨어 ── */
 function auth(req, res, next) {
   const header = req.headers.authorization || "";
@@ -54,12 +63,15 @@ app.post("/api/auth/register", (req, res) => {
     email,
     passwordHash: bcrypt.hashSync(password, 10),
     storeName: storeName || "내 가게",
+    businessNumber: "",
+    address: "",
+    phone: "",
     createdAt: new Date().toISOString(),
   };
   db.get("users").push(user).write();
 
   const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
-  res.json({ token, user: { id: user.id, email: user.email, storeName: user.storeName } });
+  res.json({ token, user: toPublicUser(user) });
 });
 
 /* ── 로그인 ── */
@@ -70,13 +82,35 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않아요." });
   }
   const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
-  res.json({ token, user: { id: user.id, email: user.email, storeName: user.storeName } });
+  res.json({ token, user: toPublicUser(user) });
 });
 
 app.get("/api/auth/me", auth, (req, res) => {
   const user = db.get("users").find({ id: req.userId }).value();
   if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
-  res.json({ user: { id: user.id, email: user.email, storeName: user.storeName } });
+  res.json({ user: toPublicUser(user) });
+});
+
+/* ── 내 정보 수정 ── */
+app.put("/api/auth/profile", auth, (req, res) => {
+  const { storeName, businessNumber, address, phone, email } = req.body || {};
+  const user = db.get("users").find({ id: req.userId }).value();
+  if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
+
+  if (email && email !== user.email) {
+    const exists = db.get("users").find({ email }).value();
+    if (exists) return res.status(409).json({ error: "이미 사용 중인 이메일이에요." });
+  }
+
+  const updated = {
+    storeName: storeName ?? user.storeName,
+    businessNumber: businessNumber ?? user.businessNumber ?? "",
+    address: address ?? user.address ?? "",
+    phone: phone ?? user.phone ?? "",
+    email: email || user.email,
+  };
+  db.get("users").find({ id: req.userId }).assign(updated).write();
+  res.json({ user: toPublicUser(db.get("users").find({ id: req.userId }).value()) });
 });
 
 /* ── 매출/지출 기록 ── */
@@ -111,19 +145,6 @@ app.delete("/api/records/:id", auth, (req, res) => {
 app.delete("/api/records", auth, (req, res) => {
   db.get("records").remove({ userId: req.userId }).write();
   res.json({ ok: true });
-});
-
-/* ── 샘플 데이터 불러오기 (서버에 저장) ── */
-app.post("/api/records/sample", auth, (req, res) => {
-  const sample = req.body?.records || [];
-  db.get("records").remove({ userId: req.userId }).write();
-  const withUser = sample.map((r) => ({
-    ...r,
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    userId: req.userId,
-  }));
-  withUser.forEach((r) => db.get("records").push(r).write());
-  res.json({ records: withUser });
 });
 
 /* ── AI 분석 프록시 (API 키는 서버에만 존재) ──

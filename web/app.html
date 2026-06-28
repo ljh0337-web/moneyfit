@@ -79,29 +79,6 @@ function calcIncomeTax(y){
   return 94060000+(y-300000000)*0.40;
 }
 
-/* ── 샘플 데이터 ── */
-function makeSampleData(){
-  const months=[
-    {m:"2025-01",rev:28400000,mat:0.33,labor:4200000,rent:1800000,util:650000,deli:0.07,etc:380000},
-    {m:"2025-02",rev:31200000,mat:0.32,labor:4200000,rent:1800000,util:580000,deli:0.07,etc:420000},
-    {m:"2025-03",rev:30100000,mat:0.33,labor:4500000,rent:1800000,util:520000,deli:0.08,etc:350000},
-    {m:"2025-04",rev:32500000,mat:0.31,labor:4500000,rent:1800000,util:480000,deli:0.08,etc:410000},
-    {m:"2025-05",rev:35800000,mat:0.32,labor:4800000,rent:1800000,util:550000,deli:0.09,etc:460000},
-    {m:"2025-06",rev:38200000,mat:0.31,labor:4800000,rent:1800000,util:620000,deli:0.09,etc:390000},
-  ];
-  const records=[];
-  months.forEach(({m,rev,mat,labor,rent,util,deli,etc})=>{
-    [{day:"07",r:0.22},{day:"14",r:0.26},{day:"21",r:0.25},{day:"28",r:0.27}]
-    .forEach(({day,r},i)=>{
-      const wRev=Math.round(rev*r);
-      const exp={재료비:Math.round(wRev*mat),인건비:Math.round(labor*r),임대료:i===0?rent:0,공과금:i===0?util:0,배달앱수수료:Math.round(wRev*deli),기타:i===0?etc:0};
-      const te=Object.values(exp).reduce((a,b)=>a+b,0);
-      records.push({date:`${m}-${day}`,revenue:wRev,expenses:exp,totalExpenses:te,netProfit:wRev-te});
-    });
-  });
-  return records.sort((a,b)=>a.date.localeCompare(b.date));
-}
-
 /* ── 스타일 ── */
 const s={
   wrap:{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif",background:G.bg,minHeight:"100vh",color:G.text},
@@ -128,7 +105,6 @@ const s={
   expGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10},
   btnPrimary:{background:G.main,color:"#fff",border:"none",borderRadius:12,padding:"13px 0",fontSize:15,fontWeight:700,cursor:"pointer",width:"100%",marginTop:8},
   btnAI:{background:G.xdark,color:"#fff",border:"none",borderRadius:12,padding:"13px 0",fontSize:14,fontWeight:700,cursor:"pointer",width:"100%",marginTop:4,display:"flex",alignItems:"center",justifyContent:"center",gap:6},
-  btnSample:{background:"none",border:`1.5px dashed ${G.main}`,color:G.dark,borderRadius:10,padding:"10px 0",fontSize:13,fontWeight:600,cursor:"pointer",width:"100%",marginBottom:12},
   btnDel:{background:"none",border:`1px solid ${G.border}`,color:G.danger,borderRadius:6,padding:"3px 8px",fontSize:11,cursor:"pointer"},
   bigProfit:{borderRadius:14,padding:"20px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"},
   badge:{display:"inline-block",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600},
@@ -435,8 +411,57 @@ function CalendarTab({records}){
   );
 }
 
+/* ── 내정보 관리 ── */
+function ProfileTab({ user, onUserUpdate }){
+  const [form,setForm]=useState({
+    storeName:user.storeName||"",
+    businessNumber:user.businessNumber||"",
+    address:user.address||"",
+    phone:user.phone||"",
+    email:user.email||"",
+  });
+  const [saving,setSaving]=useState(false);
+  const [msg,setMsg]=useState("");
+  const [err,setErr]=useState("");
+
+  const save=async()=>{
+    setSaving(true);setMsg("");setErr("");
+    try{
+      const {user:updated}=await api("/auth/profile",{method:"PUT",body:JSON.stringify(form)});
+      onUserUpdate(updated);
+      setMsg("저장됐어요!");
+      setTimeout(()=>setMsg(""),2500);
+    }catch(e){ setErr(e.message); }
+    setSaving(false);
+  };
+
+  return(
+    <div style={s.card}>
+      <div style={s.cardTitle}>👤 내 정보 관리</div>
+      {err&&<div style={s.errBox}>{err}</div>}
+      {msg&&<div style={{background:G.light,color:G.dark,fontSize:12,borderRadius:8,padding:"8px 12px",marginBottom:10,fontWeight:600}}>{msg}</div>}
+      <div style={s.fg}><label style={s.flabel}>가게 이름</label>
+        <input style={s.input} value={form.storeName} onChange={e=>setForm(p=>({...p,storeName:e.target.value}))}/>
+      </div>
+      <div style={s.fg}><label style={s.flabel}>사업자등록번호</label>
+        <input style={s.input} value={form.businessNumber} onChange={e=>setForm(p=>({...p,businessNumber:e.target.value}))} placeholder="000-00-00000"/>
+      </div>
+      <div style={s.fg}><label style={s.flabel}>주소</label>
+        <input style={s.input} value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))} placeholder="가게 주소"/>
+      </div>
+      <div style={s.fg}><label style={s.flabel}>전화번호</label>
+        <input style={s.input} value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} placeholder="010-0000-0000"/>
+      </div>
+      <div style={s.fg}><label style={s.flabel}>이메일</label>
+        <input style={s.input} type="email" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>
+      </div>
+      <button style={s.btnPrimary} onClick={save} disabled={saving}>{saving?"저장 중...":"💾 저장하기"}</button>
+    </div>
+  );
+}
+
 /* ── 메인 앱 ── */
-function MoneyFit({ user, onLogout }){
+function MoneyFit({ user, onLogout, onUserUpdate }){
   const [tab,setTab]=useState("home");
   const [records,setRecords]=useState([]);
   const [loadingRecs,setLoadingRecs]=useState(true);
@@ -444,7 +469,6 @@ function MoneyFit({ user, onLogout }){
   const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),revenue:"",...Object.fromEntries(CATS.map(c=>[c,""]))});
   const [aiText,setAiText]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
-  const [banner,setBanner]=useState(false);
   const [receiptLoading,setReceiptLoading]=useState(false);
   const [receiptNote,setReceiptNote]=useState("");
   const fileInputRef=React.useRef(null);
@@ -455,18 +479,6 @@ function MoneyFit({ user, onLogout }){
     setLoadingRecs(false);
   };
   useEffect(()=>{ loadRecords(); },[]);
-
-  const loadSample=async()=>{
-    const sample=makeSampleData();
-    try{
-      const {records}=await api("/records/sample",{method:"POST",body:JSON.stringify({records:sample})});
-      setRecords(records);
-      setMonth("2025-06");
-      setAiText("");
-      setBanner(true);
-      setTimeout(()=>setBanner(false),3000);
-    }catch(e){ alert(e.message); }
-  };
 
   const getMD=m=>{
     const mrs=records.filter(r=>r.date.startsWith(m));
@@ -548,7 +560,7 @@ function MoneyFit({ user, onLogout }){
   const chartData=allMonths.map(m=>{const d=getMD(m);return{month:m.slice(5)+"월",매출:Math.round(d.revenue/10000),순이익:Math.round(d.net/10000)};});
   const catChart=CATS.map((c,i)=>({name:CAT_LABELS[c],value:catTotals[c],pct:revenue>0?(catTotals[c]/revenue*100).toFixed(1):0,color:CAT_COLORS[i]})).filter(d=>d.value>0).sort((a,b)=>b.value-a.value);
 
-  const TABS=[["home","🏠 홈"],["calendar","📅 캘린더"],["input","✏️ 입력"],["analysis","📊 분석"],["aichat","🤖 AI비서"],["tax","🧾 세금"]];
+  const TABS=[["home","🏠 홈"],["calendar","📅 캘린더"],["input","✏️ 입력"],["analysis","📊 분석"],["aichat","🤖 AI비서"],["tax","🧾 세금"],["profile","👤 내정보"]];
 
   if(loadingRecs) return <div style={{...s.wrap,display:"flex",alignItems:"center",justifyContent:"center"}}>불러오는 중...</div>;
 
@@ -571,9 +583,7 @@ function MoneyFit({ user, onLogout }){
 
       {tab!=="calendar"&&(
         <div style={tab==="aichat"?{...s.body,padding:"10px 12px",display:"flex",flexDirection:"column"}:s.body}>
-          {banner&&<div style={{background:G.light,border:`1px solid ${G.main}`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:13,color:G.dark,fontWeight:600}}>✅ 6개월 샘플 데이터 불러왔어요! AI 분석 버튼을 눌러보세요.</div>}
-
-          {tab!=="calendar"&&tab!=="input"&&tab!=="aichat"&&(
+          {tab!=="calendar"&&tab!=="input"&&tab!=="aichat"&&tab!=="profile"&&(
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
               <span style={{fontSize:12,color:G.muted}}>📅 조회 월</span>
               <input type="month" value={month} onChange={e=>{setMonth(e.target.value);setAiText("");}} style={{...s.input,width:160,height:34}}/>
@@ -583,8 +593,6 @@ function MoneyFit({ user, onLogout }){
           {/* ── 홈 탭 ── */}
           {tab==="home"&&(
             <>
-              {records.length===0&&<button style={s.btnSample} onClick={loadSample}>🐔 아몬드치킨 샘플 데이터 불러오기 (6개월)</button>}
-
               {revenue>0&&(()=>{
                 const status=parseFloat(margin)>=12?"fire":parseFloat(margin)>=8?"good":"warn";
                 const msgs={
@@ -651,7 +659,6 @@ function MoneyFit({ user, onLogout }){
           {/* ── 입력 탭 ── */}
           {tab==="input"&&(
             <>
-              {records.length===0&&<button style={s.btnSample} onClick={loadSample}>🐔 샘플 데이터 불러오기</button>}
               <div style={s.card}>
                 <div style={s.cardTitle}>📸 영수증으로 자동 입력</div>
                 <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleReceiptFile}/>
@@ -765,6 +772,9 @@ function MoneyFit({ user, onLogout }){
               </div>
             </>
           )}
+
+          {/* ── 내정보 탭 ── */}
+          {tab==="profile"&&<ProfileTab user={user} onUserUpdate={onUserUpdate}/>}
         </div>
       )}
 
@@ -791,7 +801,7 @@ function Root(){
 
   if(checking) return <div style={{...s.wrap,display:"flex",alignItems:"center",justifyContent:"center"}}>불러오는 중...</div>;
   if(!user) return <AuthScreen onAuthed={setUser}/>;
-  return <MoneyFit user={user} onLogout={()=>{setToken(null);setUser(null);}}/>;
+  return <MoneyFit user={user} onLogout={()=>{setToken(null);setUser(null);}} onUserUpdate={setUser}/>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
