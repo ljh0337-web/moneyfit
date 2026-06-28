@@ -153,6 +153,9 @@ function AuthScreen({ onAuthed }){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [storeName,setStoreName]=useState("");
+  const [businessNumber,setBusinessNumber]=useState("");
+  const [phone,setPhone]=useState("");
+  const [address,setAddress]=useState("");
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
 
@@ -162,7 +165,7 @@ function AuthScreen({ onAuthed }){
     setLoading(true);
     try{
       const path=mode==="login"?"/auth/login":"/auth/register";
-      const body=mode==="login"?{email,password}:{email,password,storeName};
+      const body=mode==="login"?{email,password}:{email,password,storeName,businessNumber,phone,address};
       const data=await api(path,{method:"POST",body:JSON.stringify(body)});
       setToken(data.token);
       onAuthed(data.user);
@@ -180,9 +183,20 @@ function AuthScreen({ onAuthed }){
         <div style={{textAlign:"center",fontSize:12,color:G.muted,marginBottom:22}}>사장님은 장사에 집중하세요. 돈은 머니핏이 챙기겠습니다.</div>
         {err&&<div style={s.errBox}>{err}</div>}
         {mode==="signup"&&(
-          <div style={s.fg}><label style={s.flabel}>가게 이름</label>
-            <input style={s.input} value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="예: 아몬드치킨 삼산점"/>
-          </div>
+          <>
+            <div style={s.fg}><label style={s.flabel}>가게 이름</label>
+              <input style={s.input} value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="예: 아몬드치킨 삼산점"/>
+            </div>
+            <div style={s.fg}><label style={s.flabel}>사업자등록번호</label>
+              <input style={s.input} value={businessNumber} onChange={e=>setBusinessNumber(e.target.value)} placeholder="000-00-00000"/>
+            </div>
+            <div style={s.fg}><label style={s.flabel}>휴대폰 번호</label>
+              <input style={s.input} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="010-0000-0000"/>
+            </div>
+            <div style={s.fg}><label style={s.flabel}>주소</label>
+              <input style={s.input} value={address} onChange={e=>setAddress(e.target.value)} placeholder="가게 주소"/>
+            </div>
+          </>
         )}
         <div style={s.fg}><label style={s.flabel}>이메일</label>
           <input style={s.input} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="store@example.com"/>

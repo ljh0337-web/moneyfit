@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>머니핏 — 관리자</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:#f3f4f6}
+#root{min-height:100vh}
+table{border-collapse:collapse;width:100%}
+th,td{border-bottom:1px solid #e5e7eb;padding:8px 10px;font-size:13px;text-align:left}
+th{background:#f9fafb;color:#6b7280;font-weight:600}
+input{width:100%;padding:5px 7px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;box-sizing:border-box}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+const API = "/api";
+function getToken(){ return localStorage.getItem("mf_admin_token"); }
+function setToken(t){ if(t) localStorage.setItem("mf_admin_token",t); else localStorage.removeItem("mf_admin_token"); }
+async function api(path, opts={}){
+  const headers={ "Content-Type":"application/json", ...(opts.headers||{}) };
+  const token=getToken();
+  if(token) headers.Authorization=`Bearer ${token}`;
+  const r=await fetch(API+path,{...opts,headers});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error||"요청 중 오류가 발생했어요.");
+  return data;
+}
+
+const G={main:"#059669",dark:"#047857",xdark:"#065f46",danger:"#dc2626",text:"#111827",muted:"#6b7280",border:"#e5e7eb",card:"#fff"};
+
+function LoginScreen({ onLoggedIn }){
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  const submit=async()=>{
+    setErr("");setLoading(true);
+    try{
+      const data=await api("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
+      if(!data.user.isAdmin){ setErr("관리자 권한이 없는 계정이에요."); setLoading(false); return; }
+      setToken(data.token);
+      onLoggedIn(data.user);
+    }catch(e){ setErr(e.message); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:G.xdark}}>
+      <div style={{background:"#fff",borderRadius:14,padding:28,width:320}}>
+        <div style={{fontWeight:800,fontSize:18,marginBottom:16,color:G.xdark}}>머니핏 관리자</div>
+        {err&&<div style={{background:"#fef2f2",color:G.danger,fontSize:12,borderRadius:8,padding:"8px 12px",marginBottom:10}}>{err}</div>}
+        <div style={{marginBottom:10}}>
+          <input placeholder="이메일" value={email} onChange={e=>setEmail(e.target.value)} style={{width:"100%",height:38,padding:"0 10px",border:`1px solid ${G.border}`,borderRadius:8,fontSize:14}}/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <input type="password" placeholder="비밀번호" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={{width:"100%",height:38,padding:"0 10px",border:`1px solid ${G.border}`,borderRadius:8,fontSize:14}}/>
+        </div>
+        <button onClick={submit} disabled={loading} style={{width:"100%",height:40,background:G.main,color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>
+          {loading?"확인 중...":"로그인"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UserRow({ u, onSaved, onDeleted }){
+  const [edit,setEdit]=useState(false);
+  const [form,setForm]=useState({storeName:u.storeName,businessNumber:u.businessNumber,phone:u.phone,address:u.address,email:u.email});
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState("");
+
+  const save=async()=>{
+    setSaving(true);setErr("");
+    try{
+      const {user}=await api(`/admin/users/${u.id}`,{method:"PUT",body:JSON.stringify(form)});
+      onSaved(user);
+      setEdit(false);
+    }catch(e){ setErr(e.message); }
+    setSaving(false);
+  };
+
+  const del=async()=>{
+    if(!window.confirm(`${u.email} 계정을 삭제할까요? 모든 기록이 함께 삭제돼요.`))return;
+    try{ await api(`/admin/users/${u.id}`,{method:"DELETE"}); onDeleted(u.id); }
+    catch(e){ alert(e.message); }
+  };
+
+  if(edit){
+    return (
+      <tr>
+        <td><input value={form.storeName} onChange={e=>setForm(p=>({...p,storeName:e.target.value}))}/></td>
+        <td><input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/></td>
+        <td><input value={form.businessNumber} onChange={e=>setForm(p=>({...p,businessNumber:e.target.value}))}/></td>
+        <td><input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/></td>
+        <td><input value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))}/></td>
+        <td>{new Date(u.createdAt).toLocaleDateString("ko-KR")}</td>
+        <td style={{whiteSpace:"nowrap"}}>
+          <button onClick={save} disabled={saving} style={{marginRight:6,fontSize:12,padding:"4px 8px",borderRadius:6,border:"none",background:G.main,color:"#fff",cursor:"pointer"}}>저장</button>
+          <button onClick={()=>setEdit(false)} style={{fontSize:12,padding:"4px 8px",borderRadius:6,border:`1px solid ${G.border}`,background:"#fff",cursor:"pointer"}}>취소</button>
+          {err&&<div style={{color:G.danger,fontSize:11,marginTop:4}}>{err}</div>}
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr>
+      <td>{u.storeName}</td>
+      <td>{u.email}</td>
+      <td>{u.businessNumber||"-"}</td>
+      <td>{u.phone||"-"}</td>
+      <td>{u.address||"-"}</td>
+      <td>{new Date(u.createdAt).toLocaleDateString("ko-KR")}</td>
+      <td style={{whiteSpace:"nowrap"}}>
+        <button onClick={()=>setEdit(true)} style={{marginRight:6,fontSize:12,padding:"4px 8px",borderRadius:6,border:`1px solid ${G.border}`,background:"#fff",cursor:"pointer"}}>수정</button>
+        <button onClick={del} style={{fontSize:12,padding:"4px 8px",borderRadius:6,border:"none",background:G.danger,color:"#fff",cursor:"pointer"}}>삭제</button>
+      </td>
+    </tr>
+  );
+}
+
+function AdminPanel({ user, onLogout }){
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [q,setQ]=useState("");
+
+  const load=async()=>{
+    setLoading(true);
+    try{ const {users}=await api("/admin/users"); setUsers(users); }catch(e){ alert(e.message); }
+    setLoading(false);
+  };
+  useEffect(()=>{ load(); },[]);
+
+  const filtered=users.filter(u=>!q||[u.storeName,u.email,u.businessNumber,u.phone,u.address].some(v=>(v||"").toLowerCase().includes(q.toLowerCase())));
+
+  return (
+    <div style={{maxWidth:1100,margin:"0 auto",padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div style={{fontWeight:800,fontSize:20,color:G.xdark}}>회원가입 명단 ({users.length}명)</div>
+        <button onClick={onLogout} style={{fontSize:12,padding:"6px 12px",borderRadius:6,border:`1px solid ${G.border}`,background:"#fff",cursor:"pointer"}}>로그아웃</button>
+      </div>
+      <input placeholder="가게이름/이메일/번호/주소 검색" value={q} onChange={e=>setQ(e.target.value)} style={{marginBottom:14,maxWidth:320,height:36,padding:"0 10px",border:`1px solid ${G.border}`,borderRadius:8,fontSize:13}}/>
+      <div style={{background:G.card,borderRadius:12,border:`1px solid ${G.border}`,overflow:"auto"}}>
+        {loading?<div style={{padding:20,color:G.muted}}>불러오는 중...</div>:(
+          <table>
+            <thead><tr>
+              <th>가게 이름</th><th>이메일</th><th>사업자번호</th><th>휴대폰</th><th>주소</th><th>가입일</th><th>관리</th>
+            </tr></thead>
+            <tbody>
+              {filtered.map(u=>(
+                <UserRow key={u.id} u={u}
+                  onSaved={(updated)=>setUsers(list=>list.map(x=>x.id===u.id?{...x,...updated}:x))}
+                  onDeleted={(id)=>setUsers(list=>list.filter(x=>x.id!==id))}
+                />
+              ))}
+              {filtered.length===0&&<tr><td colSpan="7" style={{textAlign:"center",color:G.muted,padding:20}}>회원이 없어요</td></tr>}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Root(){
+  const [user,setUser]=useState(null);
+  const [checking,setChecking]=useState(true);
+
+  useEffect(()=>{
+    (async()=>{
+      if(getToken()){
+        try{ const {user}=await api("/auth/me"); if(user.isAdmin) setUser(user); else setToken(null); }
+        catch{ setToken(null); }
+      }
+      setChecking(false);
+    })();
+  },[]);
+
+  if(checking) return <div style={{padding:40,textAlign:"center",color:G.muted}}>불러오는 중...</div>;
+  if(!user) return <LoginScreen onLoggedIn={setUser}/>;
+  return <AdminPanel user={user} onLogout={()=>{setToken(null);setUser(null);}}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>

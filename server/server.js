@@ -29,6 +29,7 @@ async function initDb() {
       business_number TEXT NOT NULL DEFAULT '',
       address TEXT NOT NULL DEFAULT '',
       phone TEXT NOT NULL DEFAULT '',
+      is_admin BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE TABLE IF NOT EXISTS records (
@@ -55,6 +56,8 @@ const toPublicUser = (row) => ({
   businessNumber: row.business_number || "",
   address: row.address || "",
   phone: row.phone || "",
+  isAdmin: !!row.is_admin,
+  createdAt: row.created_at,
 });
 
 const toPublicRecord = (row) => ({
@@ -81,7 +84,7 @@ function auth(req, res, next) {
 
 /* ── 회원가입 ── */
 app.post("/api/auth/register", async (req, res) => {
-  const { email, password, storeName } = req.body || {};
+  const { email, password, storeName, businessNumber, phone, address } = req.body || {};
   if (!email || !password || password.length < 4) {
     return res.status(400).json({ error: "이메일과 4자 이상 비밀번호를 입력해주세요." });
   }
@@ -92,8 +95,9 @@ app.post("/api/auth/register", async (req, res) => {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const passwordHash = bcrypt.hashSync(password, 10);
     const { rows } = await pool.query(
-      `INSERT INTO users (id, email, password_hash, store_name) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [id, email, passwordHash, storeName || "내 가게"]
+      `INSERT INTO users (id, email, password_hash, store_name, business_number, phone, address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [id, email, passwordHash, storeName || "내 가게", businessNumber || "", phone || "", address || ""]
     );
     const token = jwt.sign({ uid: id }, JWT_SECRET, { expiresIn: "30d" });
     res.json({ token, user: toPublicUser(rows[0]) });
@@ -148,6 +152,50 @@ app.put("/api/auth/profile", auth, async (req, res) => {
     ]
   );
   res.json({ user: toPublicUser(updatedRows[0]) });
+});
+
+/* ── 관리자 미들웨어 ── */
+async function requireAdmin(req, res, next) {
+  const { rows } = await pool.query("SELECT is_admin FROM users WHERE id = $1", [req.userId]);
+  if (!rows[0]?.is_admin) return res.status(403).json({ error: "관리자만 접근할 수 있어요." });
+  next();
+}
+
+/* ── 관리자: 회원 명단 조회/수정/삭제 ── */
+app.get("/api/admin/users", auth, requireAdmin, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM users ORDER BY created_at DESC");
+  res.json({ users: rows.map(toPublicUser) });
+});
+
+app.put("/api/admin/users/:id", auth, requireAdmin, async (req, res) => {
+  const { storeName, businessNumber, address, phone, email } = req.body || {};
+  const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [req.params.id]);
+  const user = rows[0];
+  if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
+
+  if (email && email !== user.email) {
+    const exists = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (exists.rowCount > 0) return res.status(409).json({ error: "이미 사용 중인 이메일이에요." });
+  }
+
+  const { rows: updatedRows } = await pool.query(
+    `UPDATE users SET store_name = $1, business_number = $2, address = $3, phone = $4, email = $5 WHERE id = $6 RETURNING *`,
+    [
+      storeName ?? user.store_name,
+      businessNumber ?? user.business_number ?? "",
+      address ?? user.address ?? "",
+      phone ?? user.phone ?? "",
+      email || user.email,
+      req.params.id,
+    ]
+  );
+  res.json({ user: toPublicUser(updatedRows[0]) });
+});
+
+app.delete("/api/admin/users/:id", auth, requireAdmin, async (req, res) => {
+  if (req.params.id === req.userId) return res.status(400).json({ error: "본인 계정은 삭제할 수 없어요." });
+  await pool.query("DELETE FROM users WHERE id = $1", [req.params.id]);
+  res.json({ ok: true });
 });
 
 /* ── 매출/지출 기록 ── */
