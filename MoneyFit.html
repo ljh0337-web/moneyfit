@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>머니핏 — 사장님의 AI 동업자</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:#f3f4f6}
+#root{max-width:480px;margin:0 auto;min-height:100vh}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
+
+/* ── 상수 ── */
+const CATS = ["재료비","인건비","임대료","공과금","배달앱수수료","기타"];
+const CAT_LABELS = {재료비:"재료비",인건비:"인건비",임대료:"임대료",공과금:"공과금",배달앱수수료:"배달앱 수수료",기타:"기타"};
+const CAT_COLORS = ["#059669","#0284c7","#7c3aed","#ea580c","#db2777","#6b7280"];
+const DOW = ["일","월","화","수","목","금","토"];
+
+const G = {
+  main:"#059669",dark:"#047857",xdark:"#065f46",
+  light:"#d1fae5",xlight:"#ecfdf5",
+  gold:"#f59e0b",danger:"#dc2626",
+  warning:"#d97706",warningLight:"#fef3c7",
+  text:"#111827",muted:"#6b7280",faint:"#9ca3af",
+  bg:"#f3f4f6",card:"#ffffff",border:"#e5e7eb",
+  blue:"#0284c7",blueLight:"#dbeafe",
+};
+
+/* ── 유틸 ── */
+const fmt  = n => Math.round(n||0).toLocaleString("ko-KR");
+const fmtW = n => fmt(n)+"원";
+const fmtM = n => Math.round((n||0)/10000)+"만원";
+const pct  = (a,b) => b>0?((a/b)*100).toFixed(1)+"%":"0%";
+function calcIncomeTax(y){
+  if(y<=0)return 0;
+  if(y<=14000000)return y*0.06;
+  if(y<=50000000)return 840000+(y-14000000)*0.15;
+  if(y<=88000000)return 6240000+(y-50000000)*0.24;
+  if(y<=150000000)return 15360000+(y-88000000)*0.35;
+  if(y<=300000000)return 37060000+(y-150000000)*0.38;
+  return 94060000+(y-300000000)*0.40;
+}
+
+/* ── 샘플 데이터 ── */
+function makeSampleData(){
+  const months=[
+    {m:"2025-01",rev:28400000,mat:0.33,labor:4200000,rent:1800000,util:650000,deli:0.07,etc:380000},
+    {m:"2025-02",rev:31200000,mat:0.32,labor:4200000,rent:1800000,util:580000,deli:0.07,etc:420000},
+    {m:"2025-03",rev:30100000,mat:0.33,labor:4500000,rent:1800000,util:520000,deli:0.08,etc:350000},
+    {m:"2025-04",rev:32500000,mat:0.31,labor:4500000,rent:1800000,util:480000,deli:0.08,etc:410000},
+    {m:"2025-05",rev:35800000,mat:0.32,labor:4800000,rent:1800000,util:550000,deli:0.09,etc:460000},
+    {m:"2025-06",rev:38200000,mat:0.31,labor:4800000,rent:1800000,util:620000,deli:0.09,etc:390000},
+  ];
+  const records=[];
+  months.forEach(({m,rev,mat,labor,rent,util,deli,etc})=>{
+    [{day:"07",r:0.22},{day:"14",r:0.26},{day:"21",r:0.25},{day:"28",r:0.27}]
+    .forEach(({day,r},i)=>{
+      const wRev=Math.round(rev*r);
+      const exp={재료비:Math.round(wRev*mat),인건비:Math.round(labor*r),임대료:i===0?rent:0,공과금:i===0?util:0,배달앱수수료:Math.round(wRev*deli),기타:i===0?etc:0};
+      const te=Object.values(exp).reduce((a,b)=>a+b,0);
+      records.push({id:Date.now()+Math.random(),date:`${m}-${day}`,revenue:wRev,expenses:exp,totalExpenses:te,netProfit:wRev-te});
+    });
+  });
+  return records.sort((a,b)=>a.date.localeCompare(b.date));
+}
+
+/* ── 스타일 ── */
+const s={
+  wrap:{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif",background:G.bg,minHeight:"100vh",color:G.text},
+  header:{background:G.xdark,color:"#fff",padding:"14px 20px 0"},
+  logo:{display:"flex",alignItems:"center",gap:8,marginBottom:4},
+  logoMark:{width:32,height:32,borderRadius:8,background:G.gold,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:16,color:G.xdark},
+  logoText:{fontWeight:800,fontSize:20,letterSpacing:"-0.5px",color:"#fff"},
+  slogan:{fontSize:11,color:"rgba(255,255,255,0.6)",marginBottom:14},
+  tabs:{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.15)"},
+  tab:{padding:"10px 12px",fontSize:13,fontWeight:500,cursor:"pointer",border:"none",background:"none",color:"rgba(255,255,255,0.6)",borderBottom:"2px solid transparent"},
+  tabA:{color:"#fff",borderBottomColor:G.gold},
+  body:{padding:"16px 16px 80px"},
+  card:{background:G.card,borderRadius:14,border:`1px solid ${G.border}`,padding:"16px",marginBottom:12},
+  cardTitle:{fontSize:13,fontWeight:600,color:G.muted,marginBottom:12},
+  metricGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12},
+  metric:{background:G.card,borderRadius:12,border:`1px solid ${G.border}`,padding:"14px"},
+  metricLbl:{fontSize:11,color:G.faint,marginBottom:4},
+  metricVal:{fontSize:20,fontWeight:700,color:G.text},
+  rowItem:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${G.border}`,fontSize:14},
+  lbl:{color:G.muted},
+  fg:{marginBottom:12},
+  flabel:{fontSize:12,color:G.muted,marginBottom:5,display:"block",fontWeight:500},
+  input:{width:"100%",height:42,padding:"0 12px",border:`1px solid ${G.border}`,borderRadius:10,background:G.card,color:G.text,fontSize:14,boxSizing:"border-box",outline:"none"},
+  expGrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10},
+  btnPrimary:{background:G.main,color:"#fff",border:"none",borderRadius:12,padding:"13px 0",fontSize:15,fontWeight:700,cursor:"pointer",width:"100%",marginTop:8},
+  btnAI:{background:G.xdark,color:"#fff",border:"none",borderRadius:12,padding:"13px 0",fontSize:14,fontWeight:700,cursor:"pointer",width:"100%",marginTop:4,display:"flex",alignItems:"center",justifyContent:"center",gap:6},
+  btnSample:{background:"none",border:`1.5px dashed ${G.main}`,color:G.dark,borderRadius:10,padding:"10px 0",fontSize:13,fontWeight:600,cursor:"pointer",width:"100%",marginBottom:12},
+  btnDel:{background:"none",border:`1px solid ${G.border}`,color:G.danger,borderRadius:6,padding:"3px 8px",fontSize:11,cursor:"pointer"},
+  bigProfit:{borderRadius:14,padding:"20px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"},
+  badge:{display:"inline-block",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600},
+  divider:{border:"none",borderTop:`1px solid ${G.border}`,margin:"10px 0"},
+  empty:{textAlign:"center",color:G.faint,fontSize:13,padding:"2rem 0"},
+  aiBubble:{background:G.xdark,color:"#fff",borderRadius:16,padding:"16px",fontSize:14,lineHeight:1.7,marginTop:12},
+  recRow:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${G.border}`,fontSize:13},
+  taxRow:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${G.border}`,fontSize:14},
+};
+
+/* ── AI 브리핑 ── */
+async function fetchAI(data, month){
+  const {revenue,expenses,net,catTotals}=data;
+  const margin=revenue>0?((net/revenue)*100).toFixed(1):0;
+  const prompt=`자영업자 전문 경영 컨설턴트로서 치킨 프랜차이즈 매장 ${month} 데이터를 동업자 톤으로 분석해주세요.
+매출:${fmtW(revenue)} 지출:${fmtW(expenses)} 순이익:${fmtW(net)}(${margin}%)
+재료비:${fmtW(catTotals["재료비"])}(${pct(catTotals["재료비"],revenue)}) 인건비:${fmtW(catTotals["인건비"])}
+임대료:${fmtW(catTotals["임대료"])} 배달수수료:${fmtW(catTotals["배달앱수수료"])}(${pct(catTotals["배달앱수수료"],revenue)})
+①이번달 평가(한줄) ②돈이 새는 곳(금액포함) ③당장 실천할 개선 1가지
+4~5문장, 친근하게, 숫자는 금액으로.`;
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+  const d=await r.json();
+  return d.content?.[0]?.text||"분석 결과를 가져오지 못했어요.";
+}
+
+/* ── AI 비서 채팅 ── */
+const PRESET_Q = ["이번달 어때요?","왜 저번달보다 적어요?","재료비 줄이는 법?","세금 얼마나 나와요?"];
+
+async function fetchChatAI(history, ctx){
+  const {month,revenue,expenses,net,catTotals}=ctx;
+  const margin=revenue>0?((net/revenue)*100).toFixed(1):0;
+  const sys=`너는 자영업자(치킨집 사장님)의 AI 경영 동업자야. 친구도 비서도 아닌, 같이 고민하는 동업자 톤으로 대답해.
+숫자는 항상 금액(원) 먼저, %는 보조로만 써. 2~4문장으로 짧고 구체적으로 답해.
+[${month} 데이터] 매출:${fmtW(revenue)} 지출:${fmtW(expenses)} 순이익:${fmtW(net)}(${margin}%)
+재료비:${fmtW(catTotals["재료비"]||0)} 인건비:${fmtW(catTotals["인건비"]||0)} 임대료:${fmtW(catTotals["임대료"]||0)} 배달앱수수료:${fmtW(catTotals["배달앱수수료"]||0)}`;
+  const messages=history.map(h=>({role:h.role,content:h.text}));
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:600,system:sys,messages})});
+  const d=await r.json();
+  return d.content?.[0]?.text||"답변을 가져오지 못했어요.";
+}
+
+function AIChatTab({month,revenue,expenses,net,catTotals}){
+  const [msgs,setMsgs]=useState(()=>{
+    try{const m=localStorage.getItem("mf_chat");return m?JSON.parse(m):[];}catch{return [];}
+  });
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const bottomRef=React.useRef(null);
+
+  useEffect(()=>{
+    try{localStorage.setItem("mf_chat",JSON.stringify(msgs.slice(-10)));}catch{}
+    bottomRef.current?.scrollIntoView({behavior:"smooth"});
+  },[msgs]);
+
+  const send=async(text)=>{
+    const q=(text||input).trim();
+    if(!q||loading)return;
+    const next=[...msgs,{role:"user",text:q}];
+    setMsgs(next);setInput("");setLoading(true);
+    try{
+      const reply=await fetchChatAI(next.slice(-5),{month,revenue,expenses,net,catTotals});
+      setMsgs(m=>[...m,{role:"assistant",text:reply}]);
+    }catch{
+      setMsgs(m=>[...m,{role:"assistant",text:"답변 중 오류가 발생했어요. 다시 시도해주세요."}]);
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 100px)"}}>
+      <div style={{flex:1,overflowY:"auto",padding:"0 2px 8px"}}>
+        {msgs.length===0&&(
+          <div style={{textAlign:"center",color:G.faint,fontSize:13,padding:"2rem 0 1rem"}}>
+            🤖 동업자 AI에게 편하게 물어보세요
+          </div>
+        )}
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:10}}>
+            <div style={{maxWidth:"78%",background:m.role==="user"?G.main:G.xdark,color:"#fff",borderRadius:14,padding:"10px 13px",fontSize:13.5,lineHeight:1.6,whiteSpace:"pre-wrap"}}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {loading&&(
+          <div style={{display:"flex",justifyContent:"flex-start",marginBottom:10}}>
+            <div style={{background:G.xdark,color:"rgba(255,255,255,0.7)",borderRadius:14,padding:"10px 13px",fontSize:13}}>⏳ 생각 중...</div>
+          </div>
+        )}
+        <div ref={bottomRef}/>
+      </div>
+
+      <div style={{display:"flex",gap:6,overflowX:"auto",padding:"4px 2px 8px"}}>
+        {PRESET_Q.map(q=>(
+          <button key={q} onClick={()=>send(q)} disabled={loading}
+            style={{flex:"0 0 auto",background:G.xlight,color:G.dark,border:`1px solid ${G.light}`,borderRadius:20,padding:"7px 12px",fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+            {q}
+          </button>
+        ))}
+      </div>
+
+      <div style={{display:"flex",gap:8,padding:"4px 2px 0"}}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}}
+          placeholder="동업자에게 물어보세요..." style={{...s.input,flex:1}}/>
+        <button onClick={()=>send()} disabled={loading||!input.trim()}
+          style={{background:G.main,color:"#fff",border:"none",borderRadius:10,padding:"0 16px",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+          전송
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── 캘린더 컴포넌트 ── */
+function CalendarTab({records}){
+  const today=new Date();
+  const [year,setYear]=useState(today.getFullYear());
+  const [month,setMonth]=useState(today.getMonth());
+  const [selDay,setSelDay]=useState(today.getDate());
+
+  const firstDow=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const monthStr=`${year}-${String(month+1).padStart(2,"0")}`;
+
+  const dayMap={};
+  records.filter(r=>r.date.startsWith(monthStr)).forEach(r=>{
+    const d=parseInt(r.date.slice(8));
+    if(!dayMap[d]) dayMap[d]={rev:0,exp:0,items:[]};
+    dayMap[d].rev+=r.revenue;
+    dayMap[d].exp+=r.totalExpenses;
+    CATS.forEach(c=>{
+      if(r.expenses[c]>0) dayMap[d].items.push({name:CAT_LABELS[c],amt:-r.expenses[c]});
+    });
+    dayMap[d].items.push({name:"매출",amt:r.revenue});
+  });
+
+  const dotColor=d=>{
+    if(!dayMap[d]) return "#e5e7eb";
+    const net=dayMap[d].rev-dayMap[d].exp;
+    if(net>500000) return G.main;
+    if(net>=0) return G.gold;
+    return G.danger;
+  };
+
+  const monthRev=Object.values(dayMap).reduce((a,v)=>a+v.rev,0);
+  const monthExp=Object.values(dayMap).reduce((a,v)=>a+v.exp,0);
+  const monthNet=monthRev-monthExp;
+
+  const prevMonth=()=>{ if(month===0){setYear(y=>y-1);setMonth(11);}else setMonth(m=>m-1); setSelDay(null); };
+  const nextMonth=()=>{ if(month===11){setYear(y=>y+1);setMonth(0);}else setMonth(m=>m+1); setSelDay(null); };
+
+  const sel=selDay&&dayMap[selDay];
+  const selNet=sel?sel.rev-sel.exp:null;
+  const isToday=d=>d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
+
+  return (
+    <div>
+      <div style={{background:G.xdark,padding:"10px 18px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <button onClick={prevMonth} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:20,cursor:"pointer",padding:"4px 8px"}}>‹</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{color:"#fff",fontSize:17,fontWeight:700}}>{year}년 {month+1}월</div>
+        </div>
+        <button onClick={nextMonth} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:20,cursor:"pointer",padding:"4px 8px"}}>›</button>
+      </div>
+
+      <div style={{background:"#047857",display:"flex",padding:"10px 18px 14px"}}>
+        {[["월 매출",monthRev],["총 지출",monthExp],["순이익",monthNet]].map(([l,v],i)=>(
+          <div key={l} style={{flex:1,textAlign:"center",borderLeft:i>0?`0.5px solid rgba(255,255,255,0.2)`:undefined}}>
+            <div style={{color:"#fff",fontSize:14,fontWeight:700,letterSpacing:"-0.3px"}}>{fmtM(v)}</div>
+            <div style={{color:"rgba(255,255,255,0.55)",fontSize:10,marginTop:2}}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{background:"#fff",padding:"10px 14px 0"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+          {["일","월","화","수","목","금","토"].map((d,i)=>(
+            <div key={d} style={{textAlign:"center",fontSize:10,color:i===0?"#dc2626":G.muted,fontWeight:500,padding:"2px 0"}}>{d}</div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+          {Array(firstDow).fill(null).map((_,i)=><div key={`e${i}`}/>)}
+          {Array(daysInMonth).fill(null).map((_,i)=>{
+            const d=i+1;
+            const dow=(firstDow+i)%7;
+            const hasData=!!dayMap[d];
+            const isSel=d===selDay;
+            const itIsToday=isToday(d);
+            const net=hasData?dayMap[d].rev-dayMap[d].exp:null;
+            return (
+              <div key={d} onClick={()=>setSelDay(d)}
+                style={{borderRadius:8,padding:"3px 0",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minHeight:46,background:isSel?"#ecfdf5":undefined,border:isSel?`1.5px solid ${G.main}`:undefined}}>
+                <span style={{fontSize:12,fontWeight:500,color:itIsToday?"#fff":dow===0?"#dc2626":G.text,background:itIsToday?G.xdark:undefined,width:itIsToday?22:undefined,height:itIsToday?22:undefined,borderRadius:itIsToday?"50%":undefined,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:"1.2"}}>{d}</span>
+                <div style={{width:5,height:5,borderRadius:"50%",background:dotColor(d)}}/>
+                {hasData&&<span style={{fontSize:9,fontWeight:600,color:dotColor(d),letterSpacing:"-0.3px"}}>{(net>=0?"+":"")+Math.round(net/10000)}만</span>}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",gap:10,padding:"8px 0",borderTop:`0.5px solid ${G.border}`,marginTop:6}}>
+          {[["#059669","잘된 날"],["#f59e0b","보통"],["#dc2626","적자"],["#e5e7eb","기록 없음"]].map(([c,l])=>(
+            <div key={l} style={{display:"flex",alignItems:"center",gap:4,fontSize:10,color:G.muted}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:c}}/>
+              {l}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{background:"#fff",borderTop:`3px solid ${G.main}`,padding:14}}>
+        {!selDay&&<div style={s.empty}>날짜를 탭하면 상세 내역이 나와요</div>}
+        {selDay&&(
+          <>
+            <div style={{fontSize:13,fontWeight:700,color:G.xdark,marginBottom:10}}>
+              {month+1}월 {selDay}일 ({DOW[(firstDow+selDay-1)%7]})
+            </div>
+            {!sel&&<div style={{...s.empty,padding:"12px 0"}}>이날은 기록이 없어요</div>}
+            {sel&&(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:12}}>
+                  {[["매출",sel.rev,G.xdark],["지출",sel.exp,G.danger],["순이익",selNet,selNet>=0?G.main:G.danger]].map(([l,v,c])=>(
+                    <div key={l} style={{background:G.bg,borderRadius:8,padding:"8px",textAlign:"center"}}>
+                      <div style={{fontSize:10,color:G.muted,marginBottom:2}}>{l}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:c}}>{l==="순이익"?(v>=0?"+":"")+fmtM(v):fmtM(v)}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:11,fontWeight:600,color:G.muted,marginBottom:6}}>상세 내역</div>
+                {sel.items.sort((a,b)=>b.amt-a.amt).map((item,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`0.5px solid ${G.border}`,fontSize:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:26,height:26,borderRadius:6,background:item.amt>0?G.xlight:G.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>
+                        {item.amt>0?"💰":"🛒"}
+                      </div>
+                      <span style={{fontWeight:500}}>{item.name}</span>
+                    </div>
+                    <span style={{fontWeight:600,color:item.amt<0?G.danger:G.main}}>{fmtW(item.amt)}</span>
+                  </div>
+                ))}
+              </>
+            )}
+            <button style={{...s.btnPrimary,marginTop:12,fontSize:13}}>+ 영수증 추가하기</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── 메인 앱 ── */
+function MoneyFit(){
+  const [tab,setTab]=useState("home");
+  const [records,setRecords]=useState([]);
+  const [month,setMonth]=useState(new Date().toISOString().slice(0,7));
+  const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),revenue:"",...Object.fromEntries(CATS.map(c=>[c,""]))});
+  const [aiText,setAiText]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+  const [banner,setBanner]=useState(false);
+
+  useEffect(()=>{
+    try{const r=localStorage.getItem("mf_records");if(r)setRecords(JSON.parse(r));}catch{}
+  },[]);
+
+  const saveRecs=recs=>{
+    setRecords(recs);
+    try{localStorage.setItem("mf_records",JSON.stringify(recs));}catch{}
+  };
+
+  const loadSample=()=>{
+    saveRecs(makeSampleData());
+    setMonth("2025-06");
+    setAiText("");
+    setBanner(true);
+    setTimeout(()=>setBanner(false),3000);
+  };
+
+  const getMD=m=>{
+    const mrs=records.filter(r=>r.date.startsWith(m));
+    const revenue=mrs.reduce((a,r)=>a+r.revenue,0);
+    const expenses=mrs.reduce((a,r)=>a+r.totalExpenses,0);
+    const net=revenue-expenses;
+    const catTotals=Object.fromEntries(CATS.map(c=>[c,mrs.reduce((a,r)=>a+(r.expenses[c]||0),0)]));
+    return{mrs,revenue,expenses,net,catTotals};
+  };
+
+  const{revenue,expenses,net,catTotals}=getMD(month);
+  const margin=revenue>0?((net/revenue)*100).toFixed(1):"0.0";
+  const isProfit=net>=0;
+  const annualNet=net*12;
+  const monthlyTax=Math.round(calcIncomeTax(Math.max(0,annualNet))/12);
+  const vatMonth=Math.round(revenue*0.1);
+  const realNet=net-monthlyTax;
+  const fixedCost=(catTotals["인건비"]||0)+(catTotals["임대료"]||0)+(catTotals["공과금"]||0);
+  const varCost=(catTotals["재료비"]||0)+(catTotals["배달앱수수료"]||0)+(catTotals["기타"]||0);
+  const varRate=revenue>0?varCost/revenue:0;
+  const bep=varRate<1?Math.round(fixedCost/(1-varRate)):0;
+
+  const addRecord=()=>{
+    const rev=parseFloat(form.revenue)||0;
+    if(!rev){alert("매출을 입력해주세요!");return;}
+    const exp=Object.fromEntries(CATS.map(c=>[c,parseFloat(form[c])||0]));
+    const te=Object.values(exp).reduce((a,b)=>a+b,0);
+    saveRecs([...records,{id:Date.now(),date:form.date,revenue:rev,expenses:exp,totalExpenses:te,netProfit:rev-te}].sort((a,b)=>a.date.localeCompare(b.date)));
+    setForm({date:new Date().toISOString().slice(0,10),revenue:"",...Object.fromEntries(CATS.map(c=>[c,""]))});
+  };
+
+  const runAI=async()=>{
+    if(revenue===0){setAiText("이번달 데이터를 먼저 입력해주세요!");return;}
+    setAiLoading(true);setAiText("");
+    try{setAiText(await fetchAI({revenue,expenses,net,catTotals},month));}
+    catch{setAiText("AI 분석 중 오류가 발생했어요.");}
+    setAiLoading(false);
+  };
+
+  const allMonths=[...new Set(records.map(r=>r.date.slice(0,7)))].sort().slice(-6);
+  const chartData=allMonths.map(m=>{const d=getMD(m);return{month:m.slice(5)+"월",매출:Math.round(d.revenue/10000),순이익:Math.round(d.net/10000)};});
+  const catChart=CATS.map((c,i)=>({name:CAT_LABELS[c],value:catTotals[c],pct:revenue>0?(catTotals[c]/revenue*100).toFixed(1):0,color:CAT_COLORS[i]})).filter(d=>d.value>0).sort((a,b)=>b.value-a.value);
+
+  const TABS=[["home","🏠 홈"],["calendar","📅 캘린더"],["input","✏️ 입력"],["analysis","📊 분석"],["aichat","🤖 AI비서"],["tax","🧾 세금"]];
+
+  return(
+    <div style={s.wrap}>
+      <div style={s.header}>
+        <div style={s.logo}>
+          <div style={s.logoMark}>M</div>
+          <span style={s.logoText}>머니핏</span>
+          <span style={{fontSize:10,background:"rgba(245,158,11,0.2)",color:G.gold,padding:"2px 7px",borderRadius:20,fontWeight:600}}>BETA</span>
+        </div>
+        <div style={s.slogan}>사장님은 장사에 집중하세요. 돈은 머니핏이 챙기겠습니다.</div>
+        <div style={s.tabs}>
+          {TABS.map(([id,label])=>(
+            <button key={id} style={{...s.tab,...(tab===id?s.tabA:{})}} onClick={()=>setTab(id)}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {tab!=="calendar"&&(
+        <div style={tab==="aichat"?{...s.body,padding:"10px 12px",display:"flex",flexDirection:"column"}:s.body}>
+          {banner&&<div style={{background:G.light,border:`1px solid ${G.main}`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:13,color:G.dark,fontWeight:600}}>✅ 6개월 샘플 데이터 불러왔어요! AI 분석 버튼을 눌러보세요.</div>}
+
+          {tab!=="calendar"&&tab!=="input"&&tab!=="aichat"&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+              <span style={{fontSize:12,color:G.muted}}>📅 조회 월</span>
+              <input type="month" value={month} onChange={e=>{setMonth(e.target.value);setAiText("");}} style={{...s.input,width:160,height:34}}/>
+            </div>
+          )}
+
+          {/* ── 홈 탭 ── */}
+          {tab==="home"&&(
+            <>
+              {records.length===0&&<button style={s.btnSample} onClick={loadSample}>🐔 아몬드치킨 샘플 데이터 불러오기 (6개월)</button>}
+
+              {/* 동업자 한마디 */}
+              {revenue>0&&(()=>{
+                const avg3=getMD(month); // 단순화: 현재 달 기준
+                const status=parseFloat(margin)>=12?"fire":parseFloat(margin)>=8?"good":"warn";
+                const msgs={
+                  fire:{bg:"#fef3c7",border:`1.5px solid ${G.gold}`,icon:"🔥",lbl:"이번달 진짜 잘 나가고 있어요",lc:"#92400e",msg:`평소보다 매출이 좋아요. 이대로면 월말에 ${fmtM(net)} 남을 것 같아요. 같이 잘 마무리해봐요!`,mc:"#78350f"},
+                  good:{bg:G.xlight,border:`1.5px solid ${G.main}`,icon:"✅",lbl:"평소처럼 잘 가고 있어요",lc:G.xdark,msg:`걱정 안 하셔도 돼요. 이번달 ${fmtM(net)} 남을 것 같아요. 재료비 한 번만 확인해봐요.`,mc:"#064e3b"},
+                  warn:{bg:"#fff7ed",border:`1.5px solid #ea580c`,icon:"⚠️",lbl:"이번달 살짝 늦어요",lc:"#9a3412",msg:`평소보다 조금 낮아요. 같이 봐요. 배달 수수료가 올라간 것 같아서 확인해드릴게요.`,mc:"#7c2d12"},
+                };
+                const m2=msgs[status];
+                return(
+                  <div style={{background:m2.bg,border:m2.border,borderRadius:14,padding:14,marginBottom:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                      <span style={{fontSize:16}}>{m2.icon}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:m2.lc}}>{m2.lbl}</span>
+                    </div>
+                    <p style={{fontSize:13,color:m2.mc,lineHeight:1.55}}>{m2.msg}</p>
+                  </div>
+                );
+              })()}
+
+              <div style={{...s.bigProfit,background:isProfit?G.xlight:"#fef2f2",border:`1.5px solid ${isProfit?G.main:G.danger}`}}>
+                <div>
+                  <div style={{fontSize:12,color:G.muted,marginBottom:4}}>{month} 순이익</div>
+                  <div style={{fontSize:30,fontWeight:800,color:isProfit?G.dark:G.danger}}>{fmtW(net)}</div>
+                  <div style={{fontSize:13,color:G.muted,marginTop:2}}>이익률 <b style={{color:isProfit?G.main:G.danger}}>{margin}%</b>
+                    {parseFloat(margin)>=10
+                      ?<span style={{marginLeft:6,fontSize:11,background:G.light,color:G.dark,padding:"2px 7px",borderRadius:20}}>업종 평균 이상 ✅</span>
+                      :<span style={{marginLeft:6,fontSize:11,background:"#fee2e2",color:G.danger,padding:"2px 7px",borderRadius:20}}>업종 평균 이하 ⚠️</span>}
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:11,color:G.faint}}>매출</div>
+                  <div style={{fontSize:16,fontWeight:700}}>{fmtW(revenue)}</div>
+                  <div style={{fontSize:11,color:G.faint,marginTop:6}}>지출</div>
+                  <div style={{fontSize:16,fontWeight:700,color:G.danger}}>-{fmtW(expenses)}</div>
+                </div>
+              </div>
+
+              <div style={s.metricGrid}>
+                <div style={s.metric}><div style={s.metricLbl}>부가세 적립분</div><div style={{...s.metricVal,fontSize:18,color:G.warning}}>{fmtW(vatMonth)}</div></div>
+                <div style={s.metric}><div style={s.metricLbl}>세금 후 실수령</div><div style={{...s.metricVal,fontSize:18,color:realNet>=0?G.main:G.danger}}>{fmtW(realNet)}</div></div>
+              </div>
+
+              <div style={s.card}>
+                <div style={s.cardTitle}>🤖 AI 경영 브리핑</div>
+                <button style={s.btnAI} onClick={runAI} disabled={aiLoading}>{aiLoading?"⏳ 분석 중...":"✨ 이번달 AI 분석 받기"}</button>
+                {aiText&&<div style={s.aiBubble}><div style={{fontSize:11,color:"rgba(255,255,255,0.45)",marginBottom:8}}>머니핏 AI · {month}</div>{aiText}</div>}
+              </div>
+
+              <div style={s.card}>
+                <div style={s.cardTitle}>📋 {month} 지출 내역</div>
+                {CATS.map(c=>catTotals[c]>0&&<div key={c} style={s.rowItem}><span style={s.lbl}>{CAT_LABELS[c]}</span><div style={{textAlign:"right"}}><span style={{fontWeight:600}}>{fmtW(catTotals[c])}</span><span style={{fontSize:11,color:G.faint,marginLeft:6}}>{pct(catTotals[c],revenue)}</span></div></div>)}
+                {expenses===0&&<div style={s.empty}>이번달 지출 없음</div>}
+                <div style={{...s.rowItem,borderBottom:"none",fontWeight:700}}><span>합계</span><span>{fmtW(expenses)}</span></div>
+              </div>
+
+              {bep>0&&<div style={{...s.card,background:G.blueLight,border:`1px solid #93c5fd`}}>
+                <div style={s.cardTitle}>📐 손익분기점</div>
+                <div style={{fontSize:13,color:G.blue}}>최소 목표 매출: <b style={{fontSize:16}}>{fmtW(bep)}</b></div>
+                <div style={{fontSize:12,color:G.muted,marginTop:6}}>{revenue>=bep?<span style={{color:G.main}}>달성 +{fmtM(revenue-bep)} ✅</span>:<span style={{color:G.danger}}>미달 -{fmtM(bep-revenue)} ⚠️</span>}</div>
+              </div>}
+            </>
+          )}
+
+          {/* ── 입력 탭 ── */}
+          {tab==="input"&&(
+            <>
+              {records.length===0&&<button style={s.btnSample} onClick={loadSample}>🐔 샘플 데이터 불러오기</button>}
+              <div style={s.card}>
+                <div style={s.cardTitle}>💰 매출·지출 입력</div>
+                <div style={s.fg}><label style={s.flabel}>날짜</label><input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))} style={s.input}/></div>
+                <div style={s.fg}><label style={s.flabel}>매출 (원) *</label><input type="number" placeholder="예: 1500000" value={form.revenue} onChange={e=>setForm(p=>({...p,revenue:e.target.value}))} style={s.input}/></div>
+                <div style={{...s.cardTitle,marginTop:8}}>지출 입력</div>
+                <div style={s.expGrid}>{CATS.map(c=><div key={c} style={s.fg}><label style={s.flabel}>{CAT_LABELS[c]}</label><input type="number" placeholder="0" value={form[c]} onChange={e=>setForm(p=>({...p,[c]:e.target.value}))} style={s.input}/></div>)}</div>
+                <button style={s.btnPrimary} onClick={addRecord}>💾 저장하기</button>
+              </div>
+              <div style={s.card}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={s.cardTitle}>📝 최근 기록</div>
+                  {records.length>0&&<button style={{...s.btnDel,fontSize:12}} onClick={()=>{if(window.confirm("전체 삭제할까요?"))saveRecs([]);}}>전체 삭제</button>}
+                </div>
+                {records.length===0?<div style={s.empty}>기록이 없어요</div>
+                :<div style={{maxHeight:320,overflowY:"auto"}}>{[...records].reverse().slice(0,30).map(r=><div key={r.id} style={s.recRow}><div><div style={{fontWeight:600}}>{r.date}</div><div style={{color:G.muted,fontSize:11}}>매출 {fmtW(r.revenue)} / 지출 {fmtW(r.totalExpenses)}</div></div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{...s.badge,background:r.netProfit>=0?G.light:"#fee2e2",color:r.netProfit>=0?G.dark:G.danger}}>{fmtW(r.netProfit)}</span><button style={s.btnDel} onClick={()=>saveRecs(records.filter(x=>x.id!==r.id))}>삭제</button></div></div>)}</div>}
+              </div>
+            </>
+          )}
+
+          {/* ── 분석 탭 ── */}
+          {tab==="analysis"&&(
+            <>
+              {chartData.length>0?(
+                <>
+                  <div style={s.card}>
+                    <div style={s.cardTitle}>📈 월별 매출 vs 순이익 (만원)</div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={chartData} margin={{top:4,right:4,left:-20,bottom:0}}>
+                        <XAxis dataKey="month" fontSize={11} tick={{fill:G.muted}}/>
+                        <YAxis fontSize={10} tick={{fill:G.muted}}/>
+                        <Tooltip formatter={(v,n)=>[`${v}만원`,n]}/>
+                        <Bar dataKey="매출" fill={G.light} radius={[4,4,0,0]}/>
+                        <Bar dataKey="순이익" fill={G.main} radius={[4,4,0,0]}>
+                          {chartData.map((d,i)=><Cell key={i} fill={d.순이익>=0?G.main:G.danger}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {catChart.length>0&&<div style={s.card}>
+                    <div style={s.cardTitle}>🥧 {month} 비용 구조</div>
+                    {catChart.map(d=><div key={d.name} style={{marginBottom:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}>
+                        <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:10,height:10,borderRadius:2,background:d.color,display:"inline-block"}}/>{d.name}</span>
+                        <span><b style={{fontSize:14}}>{fmtW(d.value)}</b><span style={{color:G.faint,marginLeft:6,fontSize:12}}>({d.pct}%)</span></span>
+                      </div>
+                      <div style={{background:G.border,borderRadius:4,height:8,overflow:"hidden"}}><div style={{width:`${d.pct}%`,height:"100%",background:d.color,borderRadius:4}}/></div>
+                      {d.name==="재료비"&&parseFloat(d.pct)>35&&<div style={{fontSize:11,color:G.danger,marginTop:3}}>⚠️ 재료비율 {d.pct}% — 치킨 적정선(30~33%) 초과</div>}
+                      {d.name==="배달앱 수수료"&&parseFloat(d.pct)>8&&<div style={{fontSize:11,color:G.warning,marginTop:3}}>⚠️ 배달 수수료 {d.pct}% — 포장 비율 높이면 줄일 수 있어요</div>}
+                    </div>)}
+                  </div>}
+                </>
+              ):<div style={s.empty}>데이터를 먼저 입력해주세요</div>}
+              <div style={s.card}>
+                <div style={s.cardTitle}>🤖 AI 심층 분석</div>
+                <button style={s.btnAI} onClick={runAI} disabled={aiLoading}>{aiLoading?"⏳ 분석 중...":"✨ AI 분석 받기"}</button>
+                {aiText&&<div style={s.aiBubble}>{aiText}</div>}
+              </div>
+            </>
+          )}
+
+          {/* ── AI 비서 탭 ── */}
+          {tab==="aichat"&&<AIChatTab month={month} revenue={revenue} expenses={expenses} net={net} catTotals={catTotals}/>}
+
+          {/* ── 세금 탭 ── */}
+          {tab==="tax"&&(
+            <>
+              <div style={{...s.card,background:G.warningLight,border:`1px solid #fcd34d`}}>
+                <div style={{fontSize:12,color:G.warning,fontWeight:600,marginBottom:4}}>⚠️ 참고용 추정치입니다</div>
+                <div style={{fontSize:12,color:G.muted}}>실제 세금은 공제·경비 처리에 따라 달라요. 세무사 상담을 권장합니다.</div>
+              </div>
+              <div style={s.card}>
+                <div style={s.cardTitle}>🧾 부가세</div>
+                <div style={s.taxRow}><span style={s.lbl}>이번달 매출</span><span style={{fontWeight:600}}>{fmtW(revenue)}</span></div>
+                <div style={s.taxRow}><span style={s.lbl}>부가세 (×10%)</span><span style={{fontWeight:600,color:G.warning}}>{fmtW(vatMonth)}</span></div>
+                <div style={{...s.taxRow,borderBottom:"none",padding:"10px 8px",background:G.warningLight,borderRadius:8,marginTop:4}}>
+                  <span style={{color:G.warning,fontWeight:700}}>분기 예상 납부액</span><span style={{color:G.warning,fontWeight:700}}>{fmtW(vatMonth*3)}</span>
+                </div>
+              </div>
+              <div style={s.card}>
+                <div style={s.cardTitle}>💼 종합소득세</div>
+                <div style={s.taxRow}><span style={s.lbl}>연 환산 순이익</span><span style={{fontWeight:600}}>{fmtW(annualNet)}</span></div>
+                <div style={s.taxRow}><span style={s.lbl}>월 환산 세금</span><span style={{fontWeight:600,color:G.warning}}>{fmtW(monthlyTax)}</span></div>
+                <hr style={s.divider}/>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"12px 8px",background:realNet>=0?G.xlight:"#fef2f2",borderRadius:10}}>
+                  <span style={{fontWeight:700,color:realNet>=0?G.dark:G.danger}}>세금 빼고 진짜 남는 돈</span>
+                  <span style={{fontWeight:800,fontSize:20,color:realNet>=0?G.main:G.danger}}>{fmtW(realNet)}</span>
+                </div>
+              </div>
+              <div style={s.card}>
+                <div style={s.cardTitle}>📐 손익분기점</div>
+                <div style={s.taxRow}><span style={s.lbl}>고정비 합계</span><span style={{fontWeight:600}}>{fmtW(fixedCost)}</span></div>
+                <div style={s.taxRow}><span style={s.lbl}>변동비율</span><span style={{fontWeight:600}}>{(varRate*100).toFixed(1)}%</span></div>
+                <div style={{...s.taxRow,borderBottom:"none",padding:"12px 8px",background:G.blueLight,borderRadius:10,marginTop:4}}>
+                  <span style={{color:G.blue,fontWeight:700}}>최소 목표 매출 (BEP)</span>
+                  <span style={{color:G.blue,fontWeight:800,fontSize:16}}>{bep>0?fmtW(bep):"—"}</span>
+                </div>
+              </div>
+              <div style={s.card}>
+                <div style={s.cardTitle}>📅 신고 일정</div>
+                {[["부가세 1기 (1~6월)","7월 25일"],["부가세 2기 (7~12월)","다음해 1월 25일"],["종합소득세","5월 31일"],["중간예납","11월 30일"]].map(([n,d])=>(
+                  <div key={n} style={s.taxRow}><span style={s.lbl}>{n}</span><span style={{...s.badge,background:G.light,color:G.dark}}>{d}</span></div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── 캘린더 탭 ── */}
+      {tab==="calendar"&&<CalendarTab records={records}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<MoneyFit/>);
+</script>
+</body>
+</html>

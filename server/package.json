@@ -1,0 +1,20 @@
+{
+  "name": "moneyfit-server",
+  "version": "1.0.0",
+  "description": "머니핏(MoneyFit) 백엔드 — 회원 인증, 매출/지출 기록 저장, AI 분석 프록시",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "lowdb": "^1.0.0"
+  }
+}
