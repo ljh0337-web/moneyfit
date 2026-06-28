@@ -1,4 +1,5 @@
 require("dotenv").config();
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const cors = require("cors");
@@ -11,7 +12,12 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const PORT = process.env.PORT || 3000;
 
-const adapter = new FileSync(path.join(__dirname, "data", "db.json"));
+const dbDir = path.join(__dirname, "data");
+const dbPath = path.join(dbDir, "db.json");
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, JSON.stringify({ users: [], records: [] }));
+
+const adapter = new FileSync(dbPath);
 const db = low(adapter);
 db.defaults({ users: [], records: [] }).write();
 
