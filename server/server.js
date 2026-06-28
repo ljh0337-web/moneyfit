@@ -1,39 +1,69 @@
 require("dotenv").config();
-const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const low = require("lowdb");
-const FileSync = require("lowdb/adapters/FileSync");
+const { Pool } = require("pg");
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4.6";
 const PORT = process.env.PORT || 3000;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-const dbDir = path.join(__dirname, "data");
-const dbPath = path.join(dbDir, "db.json");
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, JSON.stringify({ users: [], records: [] }));
+if (!DATABASE_URL) {
+  throw new Error("DATABASE_URL이 설정되지 않았어요. (Neon/Supabase 등 Postgres 연결 문자열을 환경변수로 등록해주세요.)");
+}
 
-const adapter = new FileSync(dbPath);
-const db = low(adapter);
-db.defaults({ users: [], records: [] }).write();
+const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      store_name TEXT NOT NULL DEFAULT '내 가게',
+      business_number TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS records (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      revenue NUMERIC NOT NULL DEFAULT 0,
+      expenses JSONB NOT NULL DEFAULT '{}',
+      total_expenses NUMERIC NOT NULL DEFAULT 0,
+      net_profit NUMERIC NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_records_user_id ON records(user_id);
+  `);
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-const toPublicUser = (user) => ({
-  id: user.id,
-  email: user.email,
-  storeName: user.storeName,
-  businessNumber: user.businessNumber || "",
-  address: user.address || "",
-  phone: user.phone || "",
+const toPublicUser = (row) => ({
+  id: row.id,
+  email: row.email,
+  storeName: row.store_name,
+  businessNumber: row.business_number || "",
+  address: row.address || "",
+  phone: row.phone || "",
+});
+
+const toPublicRecord = (row) => ({
+  id: row.id,
+  date: row.date,
+  revenue: Number(row.revenue),
+  expenses: row.expenses,
+  totalExpenses: Number(row.total_expenses),
+  netProfit: Number(row.net_profit),
 });
 
 /* ── 인증 미들웨어 ── */
@@ -50,100 +80,104 @@ function auth(req, res, next) {
 }
 
 /* ── 회원가입 ── */
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const { email, password, storeName } = req.body || {};
   if (!email || !password || password.length < 4) {
     return res.status(400).json({ error: "이메일과 4자 이상 비밀번호를 입력해주세요." });
   }
-  const exists = db.get("users").find({ email }).value();
-  if (exists) return res.status(409).json({ error: "이미 가입된 이메일이에요." });
+  try {
+    const exists = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (exists.rowCount > 0) return res.status(409).json({ error: "이미 가입된 이메일이에요." });
 
-  const user = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-    email,
-    passwordHash: bcrypt.hashSync(password, 10),
-    storeName: storeName || "내 가게",
-    businessNumber: "",
-    address: "",
-    phone: "",
-    createdAt: new Date().toISOString(),
-  };
-  db.get("users").push(user).write();
-
-  const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
-  res.json({ token, user: toPublicUser(user) });
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const { rows } = await pool.query(
+      `INSERT INTO users (id, email, password_hash, store_name) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [id, email, passwordHash, storeName || "내 가게"]
+    );
+    const token = jwt.sign({ uid: id }, JWT_SECRET, { expiresIn: "30d" });
+    res.json({ token, user: toPublicUser(rows[0]) });
+  } catch (e) {
+    res.status(500).json({ error: "회원가입 중 오류가 발생했어요." });
+  }
 });
 
 /* ── 로그인 ── */
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body || {};
-  const user = db.get("users").find({ email }).value();
-  if (!user || !bcrypt.compareSync(password || "", user.passwordHash)) {
-    return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않아요." });
+  try {
+    const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const user = rows[0];
+    if (!user || !bcrypt.compareSync(password || "", user.password_hash)) {
+      return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않아요." });
+    }
+    const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
+    res.json({ token, user: toPublicUser(user) });
+  } catch (e) {
+    res.status(500).json({ error: "로그인 중 오류가 발생했어요." });
   }
-  const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
-  res.json({ token, user: toPublicUser(user) });
 });
 
-app.get("/api/auth/me", auth, (req, res) => {
-  const user = db.get("users").find({ id: req.userId }).value();
-  if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
-  res.json({ user: toPublicUser(user) });
+app.get("/api/auth/me", auth, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [req.userId]);
+  if (!rows[0]) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
+  res.json({ user: toPublicUser(rows[0]) });
 });
 
 /* ── 내 정보 수정 ── */
-app.put("/api/auth/profile", auth, (req, res) => {
+app.put("/api/auth/profile", auth, async (req, res) => {
   const { storeName, businessNumber, address, phone, email } = req.body || {};
-  const user = db.get("users").find({ id: req.userId }).value();
+  const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [req.userId]);
+  const user = rows[0];
   if (!user) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
 
   if (email && email !== user.email) {
-    const exists = db.get("users").find({ email }).value();
-    if (exists) return res.status(409).json({ error: "이미 사용 중인 이메일이에요." });
+    const exists = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (exists.rowCount > 0) return res.status(409).json({ error: "이미 사용 중인 이메일이에요." });
   }
 
-  const updated = {
-    storeName: storeName ?? user.storeName,
-    businessNumber: businessNumber ?? user.businessNumber ?? "",
-    address: address ?? user.address ?? "",
-    phone: phone ?? user.phone ?? "",
-    email: email || user.email,
-  };
-  db.get("users").find({ id: req.userId }).assign(updated).write();
-  res.json({ user: toPublicUser(db.get("users").find({ id: req.userId }).value()) });
+  const { rows: updatedRows } = await pool.query(
+    `UPDATE users SET store_name = $1, business_number = $2, address = $3, phone = $4, email = $5 WHERE id = $6 RETURNING *`,
+    [
+      storeName ?? user.store_name,
+      businessNumber ?? user.business_number ?? "",
+      address ?? user.address ?? "",
+      phone ?? user.phone ?? "",
+      email || user.email,
+      req.userId,
+    ]
+  );
+  res.json({ user: toPublicUser(updatedRows[0]) });
 });
 
 /* ── 매출/지출 기록 ── */
-app.get("/api/records", auth, (req, res) => {
-  const records = db.get("records").filter({ userId: req.userId }).value();
-  res.json({ records });
+app.get("/api/records", auth, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM records WHERE user_id = $1 ORDER BY date ASC", [req.userId]);
+  res.json({ records: rows.map(toPublicRecord) });
 });
 
-app.post("/api/records", auth, (req, res) => {
+app.post("/api/records", auth, async (req, res) => {
   const { date, revenue, expenses, totalExpenses, netProfit } = req.body || {};
   if (!date || typeof revenue !== "number") {
     return res.status(400).json({ error: "날짜와 매출은 필수예요." });
   }
-  const record = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    userId: req.userId,
-    date,
-    revenue,
-    expenses: expenses || {},
-    totalExpenses: totalExpenses || 0,
-    netProfit: netProfit ?? revenue - (totalExpenses || 0),
-  };
-  db.get("records").push(record).write();
-  res.json({ record });
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const te = totalExpenses || 0;
+  const net = netProfit ?? revenue - te;
+  const { rows } = await pool.query(
+    `INSERT INTO records (id, user_id, date, revenue, expenses, total_expenses, net_profit) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [id, req.userId, date, revenue, JSON.stringify(expenses || {}), te, net]
+  );
+  res.json({ record: toPublicRecord(rows[0]) });
 });
 
-app.delete("/api/records/:id", auth, (req, res) => {
-  db.get("records").remove({ id: req.params.id, userId: req.userId }).write();
+app.delete("/api/records/:id", auth, async (req, res) => {
+  await pool.query("DELETE FROM records WHERE id = $1 AND user_id = $2", [req.params.id, req.userId]);
   res.json({ ok: true });
 });
 
-app.delete("/api/records", auth, (req, res) => {
-  db.get("records").remove({ userId: req.userId }).write();
+app.delete("/api/records", auth, async (req, res) => {
+  await pool.query("DELETE FROM records WHERE user_id = $1", [req.userId]);
   res.json({ ok: true });
 });
 
@@ -295,6 +329,13 @@ app.post("/api/ai/receipt", auth, async (req, res) => {
 app.use("/app", express.static(path.join(__dirname, "..", "web")));
 app.use("/", express.static(path.join(__dirname, "..", "landing"), { dotfiles: "allow" }));
 
-app.listen(PORT, () => {
-  console.log(`머니핏 서버 실행 중 → http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`머니핏 서버 실행 중 → http://localhost:${PORT}`);
+    });
+  })
+  .catch((e) => {
+    console.error("DB 초기화 실패:", e.message);
+    process.exit(1);
+  });
