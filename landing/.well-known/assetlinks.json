@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.moneyfit.app",
+        "sha256_cert_fingerprints": ["4B:CA:05:0D:6E:95:52:BA:11:4E:90:94:38:86:C3:74:B9:09:DA:CB:01:88:AF:24:A7:17:6C:90:33:42:E0:FE"]
+      }
+    }]

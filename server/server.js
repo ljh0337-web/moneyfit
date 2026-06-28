@@ -272,7 +272,7 @@ app.post("/api/ai/receipt", auth, async (req, res) => {
 
 /* ── 정적 파일: 앱(PWA) + 랜딩페이지 ── */
 app.use("/app", express.static(path.join(__dirname, "..", "web")));
-app.use("/", express.static(path.join(__dirname, "..", "landing")));
+app.use("/", express.static(path.join(__dirname, "..", "landing"), { dotfiles: "allow" }));
 
 app.listen(PORT, () => {
   console.log(`머니핏 서버 실행 중 → http://localhost:${PORT}`);
