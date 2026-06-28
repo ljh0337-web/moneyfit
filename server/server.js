@@ -1,5 +1,6 @@
 require("dotenv").config();
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
@@ -12,6 +13,13 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4.6";
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
+const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
+
+const OAUTH = {
+  kakao: { clientId: process.env.KAKAO_CLIENT_ID, clientSecret: process.env.KAKAO_CLIENT_SECRET },
+  google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET },
+  naver: { clientId: process.env.NAVER_CLIENT_ID, clientSecret: process.env.NAVER_CLIENT_SECRET },
+};
 
 if (!DATABASE_URL) {
   throw new Error("DATABASE_URL이 설정되지 않았어요. (Neon/Supabase 등 Postgres 연결 문자열을 환경변수로 등록해주세요.)");
@@ -45,6 +53,10 @@ async function initDb() {
   `);
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id TEXT;
+    ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth ON users(oauth_provider, oauth_id);
   `);
 }
 
@@ -115,7 +127,7 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     const user = rows[0];
-    if (!user || !bcrypt.compareSync(password || "", user.password_hash)) {
+    if (!user || !user.password_hash || !bcrypt.compareSync(password || "", user.password_hash)) {
       return res.status(401).json({ error: "이메일 또는 비밀번호가 일치하지 않아요." });
     }
     const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
@@ -129,6 +141,152 @@ app.get("/api/auth/me", auth, async (req, res) => {
   const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [req.userId]);
   if (!rows[0]) return res.status(404).json({ error: "사용자를 찾을 수 없어요." });
   res.json({ user: toPublicUser(rows[0]) });
+});
+
+/* ── 소셜 로그인 (카카오/구글/네이버) ── */
+function oauthRedirectUri(provider) {
+  return `${APP_URL}/api/auth/oauth/${provider}/callback`;
+}
+
+function getCookie(req, name) {
+  const header = req.headers.cookie || "";
+  const match = header.split(";").map((s) => s.trim()).find((s) => s.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
+}
+
+const OAUTH_AUTHORIZE_URL = {
+  kakao: (clientId, redirectUri, state) =>
+    `https://kauth.kakao.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+  google: (clientId, redirectUri, state) =>
+    `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent("openid email profile")}&state=${state}`,
+  naver: (clientId, redirectUri, state) =>
+    `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+};
+
+app.get("/api/auth/oauth/:provider/start", (req, res) => {
+  const provider = req.params.provider;
+  const cfg = OAUTH[provider];
+  if (!cfg || !OAUTH_AUTHORIZE_URL[provider]) return res.status(404).send("지원하지 않는 로그인 방식이에요.");
+  if (!cfg.clientId) return res.status(503).send(`${provider} 로그인이 아직 설정되지 않았어요.`);
+
+  const state = crypto.randomBytes(16).toString("hex");
+  res.setHeader("Set-Cookie", `oauth_state=${state}; HttpOnly; Path=/; Max-Age=600; SameSite=Lax`);
+  const url = OAUTH_AUTHORIZE_URL[provider](cfg.clientId, oauthRedirectUri(provider), state);
+  res.redirect(url);
+});
+
+async function exchangeOAuthCode(provider, code) {
+  const cfg = OAUTH[provider];
+  const redirectUri = oauthRedirectUri(provider);
+
+  if (provider === "kakao") {
+    const r = await fetch("https://kauth.kakao.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret || "",
+        redirect_uri: redirectUri,
+        code,
+      }),
+    });
+    const tok = await r.json();
+    if (!r.ok) throw new Error(tok.error_description || "카카오 인증 실패");
+    const pr = await fetch("https://kapi.kakao.com/v2/user/me", {
+      headers: { Authorization: `Bearer ${tok.access_token}` },
+    });
+    const profile = await pr.json();
+    const account = profile.kakao_account || {};
+    return {
+      oauthId: String(profile.id),
+      email: account.email || `kakao_${profile.id}@no-email.moneyfit`,
+      name: account.profile?.nickname || "카카오 사용자",
+    };
+  }
+
+  if (provider === "google") {
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        redirect_uri: redirectUri,
+        code,
+      }),
+    });
+    const tok = await r.json();
+    if (!r.ok) throw new Error(tok.error_description || "구글 인증 실패");
+    const pr = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${tok.access_token}` },
+    });
+    const profile = await pr.json();
+    return { oauthId: profile.sub, email: profile.email, name: profile.name || "구글 사용자" };
+  }
+
+  if (provider === "naver") {
+    const r = await fetch(
+      `https://nid.naver.com/oauth2.0/token?grant_type=authorization_code&client_id=${encodeURIComponent(cfg.clientId)}&client_secret=${encodeURIComponent(cfg.clientSecret)}&code=${encodeURIComponent(code)}`
+    );
+    const tok = await r.json();
+    if (!r.ok || tok.error) throw new Error(tok.error_description || "네이버 인증 실패");
+    const pr = await fetch("https://openapi.naver.com/v1/nid/me", {
+      headers: { Authorization: `Bearer ${tok.access_token}` },
+    });
+    const profile = await pr.json();
+    const account = profile.response || {};
+    return {
+      oauthId: account.id,
+      email: account.email || `naver_${account.id}@no-email.moneyfit`,
+      name: account.name || account.nickname || "네이버 사용자",
+    };
+  }
+
+  throw new Error("지원하지 않는 로그인 방식이에요.");
+}
+
+app.get("/api/auth/oauth/:provider/callback", async (req, res) => {
+  const provider = req.params.provider;
+  const cfg = OAUTH[provider];
+  const { code, state, error } = req.query;
+  if (!cfg) return res.status(404).send("지원하지 않는 로그인 방식이에요.");
+  if (error) return res.redirect(`${APP_URL}/app/app.html?oauthError=${encodeURIComponent(String(error))}`);
+
+  const savedState = getCookie(req, "oauth_state");
+  if (!savedState || savedState !== state) {
+    return res.redirect(`${APP_URL}/app/app.html?oauthError=invalid_state`);
+  }
+
+  try {
+    const profile = await exchangeOAuthCode(provider, code);
+    let { rows } = await pool.query("SELECT * FROM users WHERE oauth_provider = $1 AND oauth_id = $2", [provider, profile.oauthId]);
+    let user = rows[0];
+
+    if (!user) {
+      const existingEmail = await pool.query("SELECT * FROM users WHERE email = $1", [profile.email]);
+      if (existingEmail.rows[0]) {
+        const linked = await pool.query(
+          "UPDATE users SET oauth_provider = $1, oauth_id = $2 WHERE id = $3 RETURNING *",
+          [provider, profile.oauthId, existingEmail.rows[0].id]
+        );
+        user = linked.rows[0];
+      } else {
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        const created = await pool.query(
+          `INSERT INTO users (id, email, store_name, oauth_provider, oauth_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [id, profile.email, profile.name, provider, profile.oauthId]
+        );
+        user = created.rows[0];
+      }
+    }
+
+    const token = jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: "30d" });
+    res.redirect(`${APP_URL}/app/app.html?token=${encodeURIComponent(token)}`);
+  } catch (e) {
+    res.redirect(`${APP_URL}/app/app.html?oauthError=${encodeURIComponent(e.message)}`);
+  }
 });
 
 /* ── 내 정보 수정 ── */

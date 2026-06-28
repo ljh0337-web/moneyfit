@@ -116,6 +116,7 @@ const s={
   authWrap:{minHeight:"100vh",background:G.xdark,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
   authCard:{background:"#fff",borderRadius:18,padding:28,width:"100%",maxWidth:360},
   errBox:{background:"#fef2f2",color:G.danger,fontSize:12,borderRadius:8,padding:"8px 12px",marginBottom:10},
+  btnSocial:{display:"flex",alignItems:"center",justifyContent:"center",gap:6,height:42,borderRadius:10,fontSize:14,fontWeight:600,textDecoration:"none",cursor:"pointer"},
 };
 
 /* ── AI 브리핑 (서버 프록시 호출) ── */
@@ -148,7 +149,7 @@ async function fetchChatAI(history, ctx){
 }
 
 /* ── 로그인 / 회원가입 화면 ── */
-function AuthScreen({ onAuthed }){
+function AuthScreen({ onAuthed, oauthError }){
   const [mode,setMode]=useState("login"); // login | signup
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
@@ -182,6 +183,15 @@ function AuthScreen({ onAuthed }){
         </div>
         <div style={{textAlign:"center",fontSize:12,color:G.muted,marginBottom:22}}>사장님은 장사에 집중하세요. 돈은 머니핏이 챙기겠습니다.</div>
         {err&&<div style={s.errBox}>{err}</div>}
+        {oauthError&&<div style={s.errBox}>소셜 로그인에 실패했어요. ({oauthError})</div>}
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          <a href="/api/auth/oauth/kakao/start" style={{...s.btnSocial,background:"#FEE500",color:"#191600"}}>💬 카카오로 시작하기</a>
+          <a href="/api/auth/oauth/google/start" style={{...s.btnSocial,background:"#fff",color:G.text,border:`1px solid ${G.border}`}}>🟢 구글로 시작하기</a>
+          <a href="/api/auth/oauth/naver/start" style={{...s.btnSocial,background:"#03C75A",color:"#fff"}}>N 네이버로 시작하기</a>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 0 16px",color:G.faint,fontSize:11}}>
+          <div style={{flex:1,height:1,background:G.border}}/>또는 이메일로<div style={{flex:1,height:1,background:G.border}}/>
+        </div>
         {mode==="signup"&&(
           <>
             <div style={s.fg}><label style={s.flabel}>가게 이름</label>
@@ -798,13 +808,69 @@ function MoneyFit({ user, onLogout, onUserUpdate }){
   );
 }
 
+/* ── 소셜 가입 후 가게정보 입력 ── */
+function OnboardingScreen({ user, onDone }){
+  const [storeName,setStoreName]=useState(user.storeName||"");
+  const [businessNumber,setBusinessNumber]=useState("");
+  const [phone,setPhone]=useState(user.phone||"");
+  const [address,setAddress]=useState(user.address||"");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  const submit=async()=>{
+    setErr("");
+    if(!storeName||!businessNumber){setErr("가게 이름과 사업자등록번호를 입력해주세요.");return;}
+    setLoading(true);
+    try{
+      const {user:updated}=await api("/auth/profile",{method:"PUT",body:JSON.stringify({storeName,businessNumber,phone,address})});
+      onDone(updated);
+    }catch(e){ setErr(e.message); }
+    setLoading(false);
+  };
+
+  return(
+    <div style={s.authWrap}>
+      <div style={s.authCard}>
+        <div style={{...s.logo,justifyContent:"center",marginBottom:6}}>
+          <div style={s.logoMark}>M</div>
+          <span style={{...s.logoText,color:G.xdark}}>머니핏</span>
+        </div>
+        <div style={{textAlign:"center",fontSize:12,color:G.muted,marginBottom:22}}>시작하기 전에 가게 정보를 알려주세요.</div>
+        {err&&<div style={s.errBox}>{err}</div>}
+        <div style={s.fg}><label style={s.flabel}>가게 이름</label>
+          <input style={s.input} value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="예: 아몬드치킨 삼산점"/>
+        </div>
+        <div style={s.fg}><label style={s.flabel}>사업자등록번호</label>
+          <input style={s.input} value={businessNumber} onChange={e=>setBusinessNumber(e.target.value)} placeholder="000-00-00000"/>
+        </div>
+        <div style={s.fg}><label style={s.flabel}>휴대폰 번호</label>
+          <input style={s.input} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="010-0000-0000"/>
+        </div>
+        <div style={s.fg}><label style={s.flabel}>주소</label>
+          <input style={s.input} value={address} onChange={e=>setAddress(e.target.value)} placeholder="가게 주소"/>
+        </div>
+        <button style={s.btnPrimary} onClick={submit} disabled={loading}>{loading?"처리 중...":"시작하기"}</button>
+      </div>
+    </div>
+  );
+}
+
 /* ── 루트: 인증 게이트 ── */
 function Root(){
   const [user,setUser]=useState(null);
   const [checking,setChecking]=useState(true);
+  const [oauthError,setOauthError]=useState("");
 
   useEffect(()=>{
     (async()=>{
+      const params=new URLSearchParams(window.location.search);
+      const urlToken=params.get("token");
+      const urlErr=params.get("oauthError");
+      if(urlToken||urlErr){
+        window.history.replaceState({},"",window.location.pathname);
+        if(urlToken) setToken(urlToken);
+        if(urlErr) setOauthError(urlErr);
+      }
       if(getToken()){
         try{ const {user}=await api("/auth/me"); setUser(user); }
         catch{ setToken(null); }
@@ -814,7 +880,8 @@ function Root(){
   },[]);
 
   if(checking) return <div style={{...s.wrap,display:"flex",alignItems:"center",justifyContent:"center"}}>불러오는 중...</div>;
-  if(!user) return <AuthScreen onAuthed={setUser}/>;
+  if(!user) return <AuthScreen onAuthed={setUser} oauthError={oauthError}/>;
+  if(!user.businessNumber) return <OnboardingScreen user={user} onDone={setUser}/>;
   return <MoneyFit user={user} onLogout={()=>{setToken(null);setUser(null);}} onUserUpdate={setUser}/>;
 }
 
