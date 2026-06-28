@@ -10,6 +10,8 @@ const FileSync = require("lowdb/adapters/FileSync");
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4.6";
 const PORT = process.env.PORT || 3000;
 
 const dbDir = path.join(__dirname, "data");
@@ -124,11 +126,44 @@ app.post("/api/records/sample", auth, (req, res) => {
   res.json({ records: withUser });
 });
 
-/* ── AI 분석 프록시 (API 키는 서버에만 존재) ── */
-async function callClaude({ system, messages, max_tokens }) {
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error("서버에 AI 키가 설정되지 않았어요. 관리자에게 문의해주세요.");
-  }
+/* ── AI 분석 프록시 (API 키는 서버에만 존재) ──
+   OPENROUTER_API_KEY가 있으면 OpenRouter(OpenAI 호환) 경유로 Claude 호출,
+   없으면 ANTHROPIC_API_KEY로 Anthropic 직접 호출. */
+function toOpenRouterContent(content) {
+  if (typeof content === "string") return content;
+  return content.map((block) => {
+    if (block.type === "image") {
+      return { type: "image_url", image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` } };
+    }
+    return { type: "text", text: block.text };
+  });
+}
+
+async function callClaudeViaOpenRouter({ system, messages, max_tokens }) {
+  const body = {
+    model: OPENROUTER_MODEL,
+    max_tokens: max_tokens || 800,
+    messages: [
+      ...(system ? [{ role: "system", content: system }] : []),
+      ...messages.map((m) => ({ role: m.role, content: toOpenRouterContent(m.content) })),
+    ],
+  };
+  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      "HTTP-Referer": "https://moneyfit.onrender.com",
+      "X-Title": "MoneyFit",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error?.message || "AI 호출 실패 (OpenRouter)");
+  return data?.choices?.[0]?.message?.content || "분석 결과를 가져오지 못했어요.";
+}
+
+async function callClaudeViaAnthropic({ system, messages, max_tokens }) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -144,8 +179,14 @@ async function callClaude({ system, messages, max_tokens }) {
     }),
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data?.error?.message || "AI 호출 실패");
+  if (!r.ok) throw new Error(data?.error?.message || "AI 호출 실패 (Anthropic)");
   return data?.content?.[0]?.text || "분석 결과를 가져오지 못했어요.";
+}
+
+async function callClaude(args) {
+  if (OPENROUTER_API_KEY) return callClaudeViaOpenRouter(args);
+  if (ANTHROPIC_API_KEY) return callClaudeViaAnthropic(args);
+  throw new Error("서버에 AI 키가 설정되지 않았어요. OPENROUTER_API_KEY 또는 ANTHROPIC_API_KEY를 등록해주세요.");
 }
 
 const fmtW = (n) => Math.round(n || 0).toLocaleString("ko-KR") + "원";
