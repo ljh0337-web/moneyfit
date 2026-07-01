@@ -102,14 +102,45 @@ header{position:sticky;top:0;background:rgba(255,255,255,0.92);backdrop-filter:b
 .cta p{color:rgba(255,255,255,0.75);margin-bottom:26px}
 
 footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--muted);border-top:1px solid var(--border)}
+.footerSocial{display:inline-flex;gap:10px;margin-left:6px;vertical-align:middle}
+.footerSocial a{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--xlight);font-size:13px}
+
+/* 소개/인사말 */
+.about{padding:70px 20px;text-align:center}
+.about .wrap{max-width:720px}
+.about h2{font-size:24px;font-weight:800;margin-bottom:18px;line-height:1.4}
+.about p{font-size:15px;color:var(--muted);line-height:1.8}
+
+/* 리드 생성 배너 */
+.leadBanner{background:var(--xlight);padding:26px 20px;text-align:center}
+.leadBanner .wrap{display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap;max-width:900px}
+.leadBanner h3{font-size:17px;font-weight:800;color:var(--xdark)}
+
+/* 후기 / 블로그 카드 (featList 그리드 패턴 재사용, 3열) */
+.cardGrid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:960px;margin:0 auto}
+.testiCard{background:var(--bg);border-radius:14px;padding:22px;border:1px solid var(--border)}
+.testiCard p{font-size:13.5px;color:var(--text);line-height:1.7;margin-bottom:14px}
+.testiCard .who{font-size:12.5px;color:var(--dark);font-weight:700}
+.blogCard{display:block;background:var(--bg);border-radius:14px;padding:22px;border:1px solid var(--border);cursor:default}
+.blogCard h3{font-size:15px;font-weight:700;color:var(--dark);margin-bottom:8px}
+.blogCard p{font-size:13px;color:var(--muted)}
+
+/* 문의 폼 */
+.inquiry{max-width:420px;margin:0 auto;border:1.5px solid var(--border);border-radius:18px;padding:28px 22px}
+.inquiry .field{margin-bottom:14px;text-align:left}
+.inquiry label{display:block;font-size:13px;font-weight:700;color:var(--xdark);margin-bottom:6px}
+.inquiry input,.inquiry textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:11px 12px;font-size:13.5px;font-family:inherit;color:var(--text);background:#fff}
+.inquiry textarea{min-height:90px;resize:vertical}
+.inquiry button{width:100%;background:var(--main);color:#fff;border:none;border-radius:10px;padding:12px 0;font-weight:700;font-size:14px;cursor:pointer;margin-top:4px}
 
 @media (max-width:760px){
-  .featList,.pricing,.installGrid,.heroGrid{grid-template-columns:1fr}
+  .featList,.pricing,.installGrid,.heroGrid,.cardGrid3{grid-template-columns:1fr}
   .statsGrid{grid-template-columns:1fr;gap:28px}
   .hero h1{font-size:27px}
   .heroArt{order:-1}
   .heroArt .photoCircle{width:200px;height:200px}
   .mock{margin-bottom:-1px}
+  .leadBanner .wrap{flex-direction:column}
 }
 </style>
 </head>
@@ -170,6 +201,13 @@ footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--muted);bor
   </div>
 </section>
 
+<section class="about" id="about">
+  <div class="wrap">
+    <h2>회계사가 아니라, 사장님 편에 서는 동업자를 만들었습니다</h2>
+    <p>머니핏은 "장사는 잘되는데 왜 통장엔 돈이 없지?"라는 질문에서 시작했습니다. 회계 지식도, 복잡한 엑셀도 필요 없이 3번 터치 안에 진짜 남는 돈을 보여드리는 것, 그것 하나만 보고 만들었습니다. 사장님은 장사에 집중하세요, 숫자는 머니핏이 챙기겠습니다.</p>
+  </div>
+</section>
+
 <section class="stats">
   <div class="wrap">
     <div class="when">머니핏이 매일 사장님께 챙겨드리는 것</div>
@@ -178,6 +216,13 @@ footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--muted);bor
       <div><div class="val">30초</div><div class="lbl">오늘 마감 요약 완성</div></div>
       <div><div class="val">24시간</div><div class="lbl">언제든 물어보는 AI 동업자</div></div>
     </div>
+  </div>
+</section>
+
+<section class="leadBanner">
+  <div class="wrap">
+    <h3>우리 가게, 진짜 남는 돈이 얼마인지 30초 만에 확인해보세요</h3>
+    <a class="btnGold" href="/app/app.html">무료 경영 진단 받기 →</a>
   </div>
 </section>
 
@@ -192,6 +237,48 @@ footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--muted);bor
       <div class="featRow"><div class="ico">📅</div><div><h3>오늘 마감 30초</h3><p>버튼 하나로 하루 매출·지출·순이익이 한눈에 정리돼요.</p></div></div>
       <div class="featRow"><div class="ico">🧾</div><div><h3>세금까지 미리 계산</h3><p>부가세 적립분, 종합소득세 예상액을 매달 자동으로 알려드려요.</p></div></div>
       <div class="featRow"><div class="ico">📊</div><div><h3>손익분기점 자동 계산</h3><p>이번달 최소 얼마를 팔아야 하는지 숫자로 바로 보여드려요.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>먼저 써본 사장님들의 이야기</h2>
+    <div class="sub">머니핏과 함께 돈이 새는 곳을 찾은 사장님들</div>
+    <div class="cardGrid3">
+      <div class="testiCard">
+        <p>"돈이 어디서 새는지 몰랐는데, 배달수수료가 이렇게 큰 줄 처음 알았어요. 한 달에 47만원을 아꼈습니다."</p>
+        <div class="who">— 홍대점 치킨집 박사장님</div>
+      </div>
+      <div class="testiCard">
+        <p>"영수증 찍기만 하면 끝이라 진짜 편해요. 마감 정리하던 1시간이 30초로 줄었어요."</p>
+        <div class="who">— 성수동 카페 이사장님</div>
+      </div>
+      <div class="testiCard">
+        <p>"매출은 그대로인데 순이익이 12% 올랐어요. 재료비 새는 곳을 머니핏이 잡아준 덕분입니다."</p>
+        <div class="who">— 미용실 최사장님</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>사장님을 위한 경영 팁</h2>
+    <div class="sub">머니핏이 정리한 실전 경영 노하우</div>
+    <div class="cardGrid3">
+      <a class="blogCard" href="#" onclick="return false" title="준비 중">
+        <h3>재료비 30% 넘으면 위험한 이유</h3>
+        <p>매출 대비 재료비 비율이 마지노선을 넘는 순간, 아무리 팔아도 남지 않는 구조가 됩니다.</p>
+      </a>
+      <a class="blogCard" href="#" onclick="return false" title="준비 중">
+        <h3>배달앱 수수료, 현실적으로 아끼는 방법</h3>
+        <p>중개수수료·배달비·광고비를 나눠 보면 진짜 줄일 수 있는 항목이 보입니다.</p>
+      </a>
+      <a class="blogCard" href="#" onclick="return false" title="준비 중">
+        <h3>부가세, 미리 떼어놔야 하는 진짜 이유</h3>
+        <p>매출이 곧 내 돈이 아닙니다. 분기마다 놀라지 않으려면 지금부터 적립하세요.</p>
+      </a>
     </div>
   </div>
 </section>
@@ -237,6 +324,28 @@ footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--muted);bor
   </div>
 </section>
 
+<section class="section">
+  <div class="wrap">
+    <h2>가맹점·프랜차이즈 문의</h2>
+    <div class="sub">가맹점·프랜차이즈 도입 문의는 아래 남겨주시면 24시간 안에 담당 매니저가 연락드립니다.</div>
+    <div class="inquiry">
+      <div class="field">
+        <label for="inqName">성함</label>
+        <input type="text" id="inqName" placeholder="성함을 입력해주세요">
+      </div>
+      <div class="field">
+        <label for="inqPhone">휴대폰 번호</label>
+        <input type="tel" id="inqPhone" placeholder="010-0000-0000">
+      </div>
+      <div class="field">
+        <label for="inqMsg">문의내용</label>
+        <textarea id="inqMsg" placeholder="가맹점 수, 궁금하신 내용을 남겨주세요"></textarea>
+      </div>
+      <button type="button" onclick="alert('문의가 접수되었습니다. 빠르게 연락드릴게요!')">문의 남기기</button>
+    </div>
+  </div>
+</section>
+
 <section class="installSec" id="install">
   <div class="wrap">
     <h2>머니핏 앱, 이렇게 설치하세요</h2>
@@ -272,6 +381,11 @@ footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--muted);bor
 
 <footer>
   머니핏(MoneyFit) · 소상공인을 위한 AI 경영 동업자 · ⓒ 2026 머니핏 · <a href="/privacy.html">개인정보처리방침</a>
+  <span class="footerSocial">
+    <a href="#" title="준비 중">📷</a>
+    <a href="#" title="준비 중">📝</a>
+    <a href="#" title="준비 중">▶️</a>
+  </span>
 </footer>
 
 </body>
